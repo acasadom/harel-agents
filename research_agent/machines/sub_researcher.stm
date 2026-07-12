@@ -1,0 +1,22 @@
+bind {
+  research_topic = research_agent.actions.research_topic
+  route_research = research_agent.actions.route_research
+}
+
+machine sub_researcher {
+  carry summary
+
+  initial Searching
+
+  state Searching {
+    on enter research_topic
+  }
+
+  final Done   success {}
+  final Failed failed  {}
+
+  from Searching select route_research {
+    "ok"     to Done
+    "failed" to Failed
+  }
+}

@@ -1,0 +1,64 @@
+event Approved {}
+event RequestRevision {}
+
+bind {
+  plan_research  = research_agent.actions.plan_research
+  grade_research = research_agent.actions.grade_research
+  prepare_retry  = research_agent.actions.prepare_retry
+  draft_answer   = research_agent.actions.draft_answer
+  route_grade    = research_agent.actions.route_grade
+  should_retry   = research_agent.actions.should_retry
+}
+
+machine research_agent {
+  initial Planning
+
+  state Planning {
+    on enter plan_research
+  }
+
+  state Researching {
+    invoke sub_researcher for topic in sub_topics
+    with { topic: topic question: question feedback: retry_feedback }
+  }
+
+  state Grading {
+    on enter grade_research
+  }
+
+  state Refining {
+    on enter prepare_retry
+  }
+
+  state Drafting {
+    on enter draft_answer
+  }
+
+  state HumanReview {
+    timeout 86400
+  }
+
+  final Done   success {}
+  final Failed failed  {}
+
+  from Planning    to Researching
+
+  from Researching join all to Grading else to Failed
+
+  from Grading select route_grade {
+    "complete"     to Drafting
+    "insufficient" to Refining
+    "escalate"     to HumanReview
+  }
+
+  from Refining select should_retry {
+    "retry"    to Researching
+    "escalate" to HumanReview
+  }
+
+  from Drafting to Done
+
+  from HumanReview to Done     on Approved
+  from HumanReview to Drafting on RequestRevision
+  from HumanReview to Failed   on Timeout
+}
