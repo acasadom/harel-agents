@@ -9,18 +9,20 @@ then asserts. `provider`/`context`/`runner`/`exe` are plain fixtures when a
 test doesn't need to vary them.
 """
 
-from pathlib import Path
-
 import pytest
-from harel import DictResolver, DictStore, DurableRunner, Event, definition_from_dsl_file
+from harel import DictStore, Event
 
-from research_agent import actions
 from research_agent.providers.mock import MockProvider
-
-MACHINES_DIR = Path(__file__).resolve().parent.parent / "research_agent" / "machines"
+from research_agent.run import _load_runner as _build_runner
 
 PLAN = '["topic A", "topic B", "topic C"]'
 GRADE_COMPLETE = '{"grade": "complete", "feedback": ""}'
+GRADE_ESCALATE = '{"grade": "escalate", "feedback": "requires human judgement"}'
+
+
+def _grade_insufficient(feedback: str) -> str:
+    return f'{{"grade": "insufficient", "feedback": "{feedback}"}}'
+
 
 HAPPY_PATH_RESPONSES = [
     PLAN,
@@ -29,12 +31,15 @@ HAPPY_PATH_RESPONSES = [
     "Final answer synthesizing all topics.",
 ]
 
+# Two insufficient rounds exhausts max_retries=2 — the 3rd grade never runs.
+# grade_research and prepare_retry both mark this escalation, so Drafting
+# produces a best-effort answer before parking at HumanReview.
 TWO_INSUFFICIENT_ROUNDS = [
     PLAN,
     "Summary A1", "Summary B1", "Summary C1",
-    '{"grade": "insufficient", "feedback": "f1"}',
+    _grade_insufficient("f1"),
     "Summary A2", "Summary B2", "Summary C2",
-    '{"grade": "insufficient", "feedback": "f2"}',
+    _grade_insufficient("f2"),
 ]
 
 
@@ -57,15 +62,7 @@ def context(request):
 @pytest.fixture
 def runner(provider):
     """A fresh DurableRunner + agent Definition, actions bound to `provider`."""
-    bindings = actions.bind_actions(provider)
-    agent_defn = definition_from_dsl_file(
-        MACHINES_DIR / "agent.stm", "research_agent", actions=bindings
-    )
-    sub_defn = definition_from_dsl_file(
-        MACHINES_DIR / "sub_researcher.stm", "sub_researcher", actions=bindings
-    )
-    resolver = DictResolver({"sub_researcher": sub_defn})
-    return DurableRunner(DictStore(), {agent_defn.id: agent_defn}, resolver=resolver), agent_defn
+    return _build_runner(DictStore(), provider)
 
 
 @pytest.fixture
@@ -87,7 +84,7 @@ def test_happy_path_complete(exe):
         [
             PLAN,
             "Summary A1", "Summary B1", "Summary C1",
-            '{"grade": "insufficient", "feedback": "need more depth"}',
+            _grade_insufficient("need more depth"),
             "Summary A2", "Summary B2", "Summary C2",
             GRADE_COMPLETE,
             "Final answer.",
@@ -100,15 +97,18 @@ def test_retry_then_complete(exe):
     assert exe.context["retries"] == 1
 
 
-@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS], indirect=True)
+@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS + ["draft after retries"]], indirect=True)
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
 def test_max_retries_escalates_to_human_review(exe):
     # max_retries=2 escalates after 2 rounds — no 3rd research round happens.
+    # Escalation produces a best-effort draft before parking, so a human
+    # always has something concrete to review.
     assert exe.active_path == "HumanReview"
     assert exe.status.name == "RUNNING"
+    assert exe.context["draft"] == "draft after retries"
 
 
-@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS], indirect=True)
+@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS + ["draft after retries"]], indirect=True)
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
 def test_human_approve(runner, exe):
     assert exe.active_path == "HumanReview"
@@ -118,9 +118,14 @@ def test_human_approve(runner, exe):
 
     assert exe.status.name == "DONE"
     assert exe.outcome == "success"
+    assert exe.context["draft"] == "draft after retries"
 
 
-@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS + ["Revised final answer."]], indirect=True)
+@pytest.mark.parametrize(
+    "provider",
+    [TWO_INSUFFICIENT_ROUNDS + ["draft after retries", "revised draft"]],
+    indirect=True,
+)
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
 def test_human_revise(runner, exe):
     assert exe.active_path == "HumanReview"
@@ -128,27 +133,126 @@ def test_human_revise(runner, exe):
     runner_obj, _ = runner
     exe = runner_obj.process(exe.id, Event(kind="RequestRevision"))
 
-    assert exe.status.name == "DONE"
-    assert exe.context["draft"] == "Revised final answer."
-
-
-@pytest.mark.parametrize(
-    "provider",
-    [[PLAN, "Summary A", "Summary B", "Summary C", '{"grade": "escalate", "feedback": "requires human judgement"}']],
-    indirect=True,
-)
-def test_grade_escalate_goes_directly_to_human_review(exe):
+    # Revising parks back at HumanReview (not Done) — the point is a human
+    # gets to look at the new draft too, not just the first one.
     assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "revised draft"
+
+
+def test_human_review_loop_supports_multiple_revisions():
+    provider = MockProvider(
+        [
+            PLAN, "Summary A", "Summary B", "Summary C",
+            GRADE_ESCALATE,
+            "draft 1", "draft 2", "draft 3",
+        ]
+    )
+    runner, agent_defn = _build_runner(DictStore(), provider)
+    exe = runner.create(agent_defn.id, context={"question": "Q"})
+    assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "draft 1"
+
+    exe = runner.process(exe.id, Event(kind="RequestRevision"))
+    assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "draft 2"
+
+    exe = runner.process(exe.id, Event(kind="RequestRevision"))
+    assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "draft 3"
+
+    exe = runner.process(exe.id, Event(kind="Approved"))
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "success"
+    assert exe.context["draft"] == "draft 3"
 
 
 @pytest.mark.parametrize(
     "provider",
-    [[PLAN, "Summary A", RuntimeError("simulated provider outage"), "Summary C"]],
+    [[PLAN, "Summary A", "Summary B", "Summary C", GRADE_ESCALATE, "best-effort draft"]],
     indirect=True,
 )
-def test_fan_out_failure_routes_to_failed(exe):
+def test_grade_escalate_produces_draft_then_parks_at_human_review(exe):
+    assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "best-effort draft"
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [[PLAN, RuntimeError("a"), RuntimeError("b"), RuntimeError("c")]],
+    indirect=True,
+)
+def test_fan_out_all_failures_routes_to_failed(exe):
     assert exe.status.name == "DONE"
     assert exe.outcome == "failed"
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        [
+            PLAN,
+            "Summary A", RuntimeError("simulated provider outage"), "Summary C",
+            GRADE_COMPLETE,
+            "Final answer from partial research.",
+        ]
+    ],
+    indirect=True,
+)
+def test_fan_out_partial_failure_survives(exe):
+    # join any: one failed sub-topic doesn't sink research that otherwise
+    # succeeded — grading/drafting proceed with whatever came back.
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "success"
+    assert exe.context["draft"] == "Final answer from partial research."
+
+
+@pytest.mark.parametrize("provider", [["not valid json"]], indirect=True)
+def test_plan_research_failure_routes_to_failed(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "failed"
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [[PLAN, "Summary A", "Summary B", "Summary C", "not valid json"]],
+    indirect=True,
+)
+def test_grade_research_failure_routes_to_failed(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "failed"
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [[PLAN, "Summary A", "Summary B", "Summary C", GRADE_COMPLETE, RuntimeError("draft boom")]],
+    indirect=True,
+)
+def test_draft_answer_failure_routes_to_failed(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "failed"
+
+
+def test_human_review_timeout_fires_via_sweep():
+    fake_time = [1_000_000.0]
+
+    def clock() -> float:
+        return fake_time[0]
+
+    provider = MockProvider(
+        [PLAN, "Summary A", "Summary B", "Summary C", GRADE_ESCALATE, "draft"]
+    )
+    store = DictStore()
+    runner, agent_defn = _build_runner(store, provider, clock=clock)
+    exe = runner.create(agent_defn.id, context={"question": "Q"})
+    assert exe.active_path == "HumanReview"
+
+    fake_time[0] += 86400 + 1  # past the 24h timeout
+    fired = runner.fire_due_timers()
+
+    assert fired == 1
+    updated = store.load(exe.id)
+    assert updated.status.name == "DONE"
+    assert updated.outcome == "failed"
 
 
 @pytest.mark.parametrize(

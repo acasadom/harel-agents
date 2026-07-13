@@ -3,7 +3,7 @@
 A reference implementation of a **Parallel Research Agent** built on
 [harel](https://github.com/acasadom/harel) — a durable, statechart-driven
 orchestrator for LLM agent workflows. Given a question, it plans sub-topics,
-researches them in parallel, grades the result, retries with feedback if
+fans out research across them, grades the result, retries with feedback if
 needed, drafts a final answer, and optionally waits for human review.
 
 This repo is not a library — it's something to clone and adapt.
@@ -27,7 +27,10 @@ Drafting : on enter: draft_answer
 HumanReview : timeout: 86400
 Done : outcome: success
 Failed : outcome: failed
-Planning --> Researching
+state Planning__route_plan <<choice>>
+Planning --> Planning__route_plan
+Planning__route_plan --> Researching : route_plan=ok
+Planning__route_plan --> Failed : route_plan=failed
 state Researching__join_success <<choice>>
 Researching --> Researching__join_success
 Researching__join_success --> Grading : join_success=pass
@@ -36,12 +39,17 @@ state Grading__route_grade <<choice>>
 Grading --> Grading__route_grade
 Grading__route_grade --> Drafting : route_grade=complete
 Grading__route_grade --> Refining : route_grade=insufficient
-Grading__route_grade --> HumanReview : route_grade=escalate
+Grading__route_grade --> Drafting : route_grade=escalate
+Grading__route_grade --> Failed : route_grade=failed
 state Refining__should_retry <<choice>>
 Refining --> Refining__should_retry
 Refining__should_retry --> Researching : should_retry=retry
-Refining__should_retry --> HumanReview : should_retry=escalate
-Drafting --> Done
+Refining__should_retry --> Drafting : should_retry=escalate
+state Drafting__route_draft <<choice>>
+Drafting --> Drafting__route_draft
+Drafting__route_draft --> Done : route_draft=ok
+Drafting__route_draft --> HumanReview : route_draft=needs_review
+Drafting__route_draft --> Failed : route_draft=failed
 HumanReview --> Done : Approved
 HumanReview --> Drafting : RequestRevision
 HumanReview --> Failed : Timeout
@@ -58,7 +66,7 @@ Failed --> [*]
   reviewer who takes 6 hours to respond, doesn't lose state; the execution
   resumes exactly where it left off.
 - **Testable** — the engine is pure (no I/O of its own), so the whole
-  machine — including the parallel fan-out and the retry loop — is
+  machine — including the fan-out and the retry loop — is
   unit-tested end to end with zero network calls, via a scripted
   `MockProvider`.
 
@@ -116,38 +124,57 @@ machine — changes: swapping providers is a CLI flag, not a code change.
 
 ## How it works
 
-- **Planning** asks the provider to break the question into sub-topics.
-- **Researching** fans out one child execution per sub-topic — in parallel —
-  each running the [`sub_researcher`](research_agent/machines/sub_researcher.stm)
-  machine to produce a summary. If every child succeeds, the join continues
-  to Grading; if any child fails, the whole run routes to `Failed`.
+- **Planning** asks the provider to break the question into sub-topics; a
+  malformed plan routes straight to `Failed`.
+- **Researching** fans out one child execution per sub-topic (harel 0.2.1
+  drives them one at a time under the hood, not concurrently — the DSL still
+  collapses the fan-out to one line either way) running the
+  [`sub_researcher`](research_agent/machines/sub_researcher.stm) machine to
+  produce a summary. If *any* child succeeds, the join continues to Grading
+  using whatever summaries came back; only if every child fails does the
+  whole run route to `Failed`.
 - **Grading** judges whether the collected summaries answer the question:
-  `complete` moves on to drafting, `insufficient` goes to refine-and-retry,
-  `escalate` parks the run for a human.
+  `complete` moves straight to drafting and `Done`, no human involved.
+  `insufficient` goes to refine-and-retry. `escalate` — or a grading call
+  that itself failed — also goes to Drafting, but flagged for human review.
 - **Refining** records the grader's feedback and increments a retry counter;
   a selector sends the run back to Researching (feedback-guided) if retries
-  remain, or escalates to `HumanReview` once `max_retries` is hit.
-- **Drafting** synthesizes the final answer from all summaries.
-- **HumanReview** is a parked state with a 24-hour durable timeout. It
-  reaches `Done` on `Approved`, loops back to `Drafting` on
-  `RequestRevision`, or reaches `Failed` if the timeout fires first.
+  remain, or flags for review and heads to Drafting once `max_retries` is
+  hit.
+- **Drafting** synthesizes an answer from the summaries collected so far —
+  even on the escalation path, so a human always has something concrete to
+  review, never an empty result. It reaches `Done` directly on the normal
+  `complete` path, or `HumanReview` on the escalation path.
+- **HumanReview** is a parked state with a 24-hour durable timeout — see the
+  note below on `--sweep-timers`. It reaches `Done` on `Approved`, loops
+  back through `Drafting` (and back to `HumanReview` again) on
+  `RequestRevision` — so a draft can be revised more than once — or reaches
+  `Failed` if the timeout fires first.
 
 ## Human-in-the-loop
 
 When grading escalates — either directly, or after `max_retries` refine
-attempts — the run parks at `HumanReview` and the CLI prints the execution
-id along with the two commands that can move it forward:
+attempts — the run produces a best-effort draft first, then parks at
+`HumanReview`, and the CLI prints the execution id along with the two
+commands that can move it forward:
 
 ```bash
 uv run python -m research_agent.run --approve <execution_id> --db research.sqlite3
 uv run python -m research_agent.run --revise  <execution_id> --db research.sqlite3
 ```
 
-`--approve` moves straight to `Done`. `--revise` sends the run back through
+`--approve` doesn't need `--provider` — that transition triggers no LLM call.
+`--revise` reuses whichever provider produced the original research unless
+you pass `--provider` explicitly, and sends the run back through
 `Drafting` to produce a new answer from the same research. Both are ordinary
 CLI invocations in a *new* process — `--db` is what lets them find the
 parked execution; the default in-memory store doesn't survive a process
 restart.
+
+`HumanReview`'s 24h timeout is a durable timer, but harel only fires a due
+timer when something asks it to — nothing does that automatically here. Run
+`--sweep-timers --db research.sqlite3` periodically (e.g. from cron) against
+the same `--db` to actually let an unreviewed run time out to `Failed`.
 
 ## vs LangGraph
 
@@ -155,7 +182,7 @@ Full comparison: [`docs/vs-langgraph.md`](docs/vs-langgraph.md).
 
 In short: the `.stm` file is a spec you can read, diff, and statically
 validate before running it — not Python code you have to execute to discover
-its shape. The parallel fan-out above is 3 lines of DSL; the same pattern in
+its shape. The fan-out above is 3 lines of DSL; the same pattern in
 LangGraph means hand-wiring a `Send` function, a reducer, and a conditional
 edge.
 

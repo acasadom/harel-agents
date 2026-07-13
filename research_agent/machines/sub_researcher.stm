@@ -4,7 +4,7 @@ bind {
 }
 
 machine sub_researcher {
-  carry summary
+  carry summary, research_error
 
   initial Searching
 

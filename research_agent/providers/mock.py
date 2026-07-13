@@ -22,7 +22,7 @@ class MockProvider(LLMProvider):
             "Summary of topic A.",                  # research_topic (child 0)
             "Summary of topic B.",                  # research_topic (child 1)
             "Summary of topic C.",                  # research_topic (child 2)
-            "complete",                             # grade_research
+            '{"grade": "complete", "feedback": ""}', # grade_research
             "Final answer synthesizing all topics.", # draft_answer
         ])
     """

@@ -3,9 +3,11 @@ event RequestRevision {}
 
 bind {
   plan_research  = research_agent.actions.plan_research
+  route_plan     = research_agent.actions.route_plan
   grade_research = research_agent.actions.grade_research
   prepare_retry  = research_agent.actions.prepare_retry
   draft_answer   = research_agent.actions.draft_answer
+  route_draft    = research_agent.actions.route_draft
   route_grade    = research_agent.actions.route_grade
   should_retry   = research_agent.actions.should_retry
 }
@@ -19,7 +21,7 @@ machine research_agent {
 
   state Researching {
     invoke sub_researcher for topic in sub_topics
-    with { topic: topic question: question feedback: retry_feedback }
+    with { topic: topic question: question feedback: grade_feedback }
   }
 
   state Grading {
@@ -41,22 +43,30 @@ machine research_agent {
   final Done   success {}
   final Failed failed  {}
 
-  from Planning    to Researching
+  from Planning select route_plan {
+    "ok"     to Researching
+    "failed" to Failed
+  }
 
-  from Researching join all to Grading else to Failed
+  from Researching join any to Grading else to Failed
 
   from Grading select route_grade {
     "complete"     to Drafting
     "insufficient" to Refining
-    "escalate"     to HumanReview
+    "escalate"     to Drafting
+    "failed"       to Failed
   }
 
   from Refining select should_retry {
     "retry"    to Researching
-    "escalate" to HumanReview
+    "escalate" to Drafting
   }
 
-  from Drafting to Done
+  from Drafting select route_draft {
+    "ok"           to Done
+    "needs_review" to HumanReview
+    "failed"       to Failed
+  }
 
   from HumanReview to Done     on Approved
   from HumanReview to Drafting on RequestRevision

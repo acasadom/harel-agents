@@ -1,4 +1,4 @@
-from research_agent.providers.base import LLMProvider
+from research_agent.providers.base import LLMProvider, require_sdk
 
 
 class OpenAIProvider(LLMProvider):
@@ -19,10 +19,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 2048,
         api_key: str | None = None,
     ) -> None:
-        try:
-            import openai
-        except ImportError:
-            raise ImportError("pip install 'harel-agents[openai]'")
+        openai = require_sdk("openai", "openai")
         self._client = openai.OpenAI(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens

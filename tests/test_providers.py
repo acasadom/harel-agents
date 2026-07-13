@@ -4,6 +4,7 @@ the Anthropic/OpenAI SDKs are faked via sys.modules so complete() request
 shaping and response parsing can be checked without the packages installed.
 """
 
+import importlib
 import sys
 import types
 
@@ -35,12 +36,22 @@ def test_mock_provider_raises_scripted_exception():
         provider.complete("sys", "u1")
 
 
-def test_anthropic_provider_missing_sdk_raises_import_error(monkeypatch):
-    monkeypatch.setitem(sys.modules, "anthropic", None)
-    from research_agent.providers.anthropic import AnthropicProvider
+@pytest.mark.parametrize(
+    "module_name,provider_module,provider_class,extra",
+    [
+        ("anthropic", "research_agent.providers.anthropic", "AnthropicProvider", "anthropic"),
+        ("openai", "research_agent.providers.openai", "OpenAIProvider", "openai"),
+    ],
+)
+def test_provider_missing_sdk_raises_import_error(
+    monkeypatch, module_name, provider_module, provider_class, extra
+):
+    monkeypatch.setitem(sys.modules, module_name, None)
+    mod = importlib.import_module(provider_module)
+    provider_cls = getattr(mod, provider_class)
 
-    with pytest.raises(ImportError, match="harel-agents\\[anthropic\\]"):
-        AnthropicProvider()
+    with pytest.raises(ImportError, match=rf"harel-agents\[{extra}\]"):
+        provider_cls()
 
 
 def test_anthropic_provider_complete_sends_system_and_user(monkeypatch):
@@ -71,14 +82,6 @@ def test_anthropic_provider_complete_sends_system_and_user(monkeypatch):
     assert captured["max_tokens"] == 42
     assert captured["system"] == "system prompt"
     assert captured["messages"] == [{"role": "user", "content": "user prompt"}]
-
-
-def test_openai_provider_missing_sdk_raises_import_error(monkeypatch):
-    monkeypatch.setitem(sys.modules, "openai", None)
-    from research_agent.providers.openai import OpenAIProvider
-
-    with pytest.raises(ImportError, match="harel-agents\\[openai\\]"):
-        OpenAIProvider()
 
 
 def test_openai_provider_complete_sends_system_and_user(monkeypatch):

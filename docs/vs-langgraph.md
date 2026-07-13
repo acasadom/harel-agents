@@ -11,8 +11,8 @@ A `.stm` file is a spec, not a program. `research_agent/machines/agent.stm`
 in this repo is the entire orchestration logic for the research agent —
 states, transitions, retry policy, human-in-the-loop escalation — in ~40
 lines a non-engineer can read top to bottom. It's diffable in code review,
-renders as a diagram (`harel viz`), and never executes arbitrary code at
-definition time.
+renders as a diagram (`harel render agent.stm --mermaid`), and never executes
+arbitrary code at definition time.
 
 LangGraph models the same thing as a `StateGraph` built up imperatively:
 `add_node`, `add_edge`, `add_conditional_edges` calls scattered through a
@@ -34,16 +34,19 @@ surfaces at all, rather than silently looping or dead-ending.
 
 ## 3. Fan-out
 
-The parallel research step — spawn one child per sub-topic, wait for all of
-them, then continue — is one line of harel DSL:
+The research step — spawn one child per sub-topic, wait for them, then
+continue — is one line of harel DSL. (The DSL models this as a fan-out; as of
+harel 0.2.1 the engine drives spawned children one at a time rather than
+concurrently, so "one line instead of hand-wired `Send` plumbing" is the
+win here, not wall-clock parallelism — see the engine's `_flush`.)
 
 ```
 state Researching {
   invoke sub_researcher for topic in sub_topics
-  with { topic: topic question: question feedback: retry_feedback }
+  with { topic: topic question: question feedback: grade_feedback }
 }
 
-from Researching join all to Grading else to Failed
+from Researching join any to Grading else to Failed
 ```
 
 The equivalent in LangGraph requires manually constructing `Send` objects in
@@ -80,7 +83,9 @@ effects, with no I/O of its own. That's what makes the `MockProvider` pattern
 in this repo work: every test in `tests/test_agent.py` drives the full
 statechart, including the fan-out and retry loop, with zero network calls and
 zero API keys, because the LLM calls are the *only* side effect and they're
-injected through `context["__provider__"]`.
+injected as a closure per action (`research_agent.actions.bind_actions()`,
+passed as `definition_from_dsl_file(..., actions=...)`) — never through the
+execution's own persisted context.
 
 LangGraph nodes are just Python functions, so the same discipline is
 possible — but it's a convention you have to impose yourself, not something
@@ -88,9 +93,10 @@ the framework gives you.
 
 ## 6. Visualization
 
-`harel viz agent.stm` renders the machine to Mermaid or PlantUML — the
-diagram at the top of this repo's README is generated straight from the
-`.stm` file, so it can never drift out of sync with what actually runs.
+`harel render agent.stm --mermaid` (or `--plantuml`) renders the machine to a
+diagram — the one at the top of this repo's README is generated straight
+from the `.stm` file, so it can never drift out of sync with what actually
+runs.
 
 LangGraph can render its compiled graph too, but the diagram is a projection
 of the imperative graph-building code, not the source of truth itself.
@@ -102,10 +108,10 @@ of the imperative graph-building code, not the source of truth itself.
 ```
 state Researching {
   invoke sub_researcher for topic in sub_topics
-  with { topic: topic question: question feedback: retry_feedback }
+  with { topic: topic question: question feedback: grade_feedback }
 }
 
-from Researching join all to Grading else to Failed
+from Researching join any to Grading else to Failed
 ```
 
 **LangGraph:**

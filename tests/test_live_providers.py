@@ -41,6 +41,29 @@ def test_anthropic_provider_completes_a_real_prompt():
 
 
 @pytest.mark.skipif(
+    importlib.util.find_spec("anthropic") is None,
+    reason="anthropic not installed (pip install 'harel-agents[anthropic]')",
+)
+@pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
+)
+def test_anthropic_provider_default_model_is_valid():
+    # No model= override — this is what --provider anthropic actually uses,
+    # and the only test that would catch DEFAULT_MODEL regressing to a
+    # stale/invalid id (as it once did).
+    from research_agent.providers.anthropic import AnthropicProvider
+
+    provider = AnthropicProvider(max_tokens=16)
+    result = provider.complete(
+        "Reply with exactly one word, no punctuation.",
+        "What is the capital of France?",
+    )
+
+    assert isinstance(result, str)
+    assert result.strip()
+
+
+@pytest.mark.skipif(
     importlib.util.find_spec("openai") is None,
     reason="openai not installed (pip install 'harel-agents[openai]')",
 )
@@ -51,6 +74,27 @@ def test_openai_provider_completes_a_real_prompt():
     from research_agent.providers.openai import OpenAIProvider
 
     provider = OpenAIProvider(model="gpt-4o-mini", max_tokens=16)
+    result = provider.complete(
+        "Reply with exactly one word, no punctuation.",
+        "What is the capital of France?",
+    )
+
+    assert isinstance(result, str)
+    assert result.strip()
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("openai") is None,
+    reason="openai not installed (pip install 'harel-agents[openai]')",
+)
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set"
+)
+def test_openai_provider_default_model_is_valid():
+    # No model= override — same rationale as the Anthropic variant above.
+    from research_agent.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider(max_tokens=16)
     result = provider.complete(
         "Reply with exactly one word, no punctuation.",
         "What is the capital of France?",

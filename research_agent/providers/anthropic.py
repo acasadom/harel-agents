@@ -1,4 +1,4 @@
-from research_agent.providers.base import LLMProvider
+from research_agent.providers.base import LLMProvider, require_sdk
 
 
 class AnthropicProvider(LLMProvider):
@@ -19,10 +19,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 2048,
         api_key: str | None = None,
     ) -> None:
-        try:
-            import anthropic
-        except ImportError:
-            raise ImportError("pip install 'harel-agents[anthropic]'")
+        anthropic = require_sdk("anthropic", "anthropic")
         self._client = anthropic.Anthropic(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens
