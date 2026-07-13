@@ -16,11 +16,14 @@ import argparse
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from harel import DictResolver, DictStore, DurableRunner, Event, SqliteStore
 from harel import definition_from_dsl_file
 
 from research_agent import actions
 from research_agent.providers.mock import MockProvider
+
+load_dotenv()
 
 MACHINES_DIR = Path(__file__).parent / "machines"
 

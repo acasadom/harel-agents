@@ -73,9 +73,13 @@ uv run python -m research_agent.run --question "What are the tradeoffs of statec
 ```
 
 That runs the mock provider by default — no API key needed, useful to see the
-whole flow work end to end. Ask a real question with a real model:
+whole flow work end to end. To ask a real question with a real model, copy
+`.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
+(loaded automatically), or export them in your shell:
 
 ```bash
+cp .env.example .env   # then edit it
+
 uv run python -m research_agent.run \
   --question "What are the tradeoffs of statecharts for agent orchestration?" \
   --provider anthropic --db research.sqlite3

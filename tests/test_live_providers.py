@@ -13,6 +13,9 @@ import importlib.util
 import os
 
 import pytest
+from dotenv import load_dotenv
+
+load_dotenv()
 
 pytestmark = pytest.mark.live
 
