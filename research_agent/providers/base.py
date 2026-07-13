@@ -16,4 +16,4 @@ def require_sdk(module_name: str, extra: str) -> Any:
     try:
         return importlib.import_module(module_name)
     except ImportError:
-        raise ImportError(f"pip install 'harel-agents[{extra}]'")
+        raise ImportError(f"uv sync --extra {extra}")

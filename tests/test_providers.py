@@ -52,7 +52,7 @@ def test_provider_missing_sdk_raises_import_error(
     mod = importlib.import_module(provider_module)
     provider_cls = getattr(mod, provider_class)
 
-    with pytest.raises(ImportError, match=rf"harel-agents\[{extra}\]"):
+    with pytest.raises(ImportError, match=rf"uv sync --extra {extra}"):
         provider_cls()
 
 

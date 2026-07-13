@@ -22,7 +22,7 @@ pytestmark = pytest.mark.live
 
 @pytest.mark.skipif(
     importlib.util.find_spec("anthropic") is None,
-    reason="anthropic not installed (pip install 'harel-agents[anthropic]')",
+    reason="anthropic not installed (uv sync --extra anthropic)",
 )
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
@@ -42,7 +42,7 @@ def test_anthropic_provider_completes_a_real_prompt():
 
 @pytest.mark.skipif(
     importlib.util.find_spec("anthropic") is None,
-    reason="anthropic not installed (pip install 'harel-agents[anthropic]')",
+    reason="anthropic not installed (uv sync --extra anthropic)",
 )
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
@@ -65,7 +65,7 @@ def test_anthropic_provider_default_model_is_valid():
 
 @pytest.mark.skipif(
     importlib.util.find_spec("openai") is None,
-    reason="openai not installed (pip install 'harel-agents[openai]')",
+    reason="openai not installed (uv sync --extra openai)",
 )
 @pytest.mark.skipif(
     not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set"
@@ -85,7 +85,7 @@ def test_openai_provider_completes_a_real_prompt():
 
 @pytest.mark.skipif(
     importlib.util.find_spec("openai") is None,
-    reason="openai not installed (pip install 'harel-agents[openai]')",
+    reason="openai not installed (uv sync --extra openai)",
 )
 @pytest.mark.skipif(
     not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set"
@@ -109,7 +109,7 @@ def test_openai_provider_default_model_is_valid():
 # the cheapest of the three to actually run with a real key.
 @pytest.mark.skipif(
     importlib.util.find_spec("openai") is None,
-    reason="openai not installed (pip install 'harel-agents[groq]')",
+    reason="openai not installed (uv sync --extra groq)",
 )
 @pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"), reason="GROQ_API_KEY not set")
 def test_groq_provider_completes_a_real_prompt():
