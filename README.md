@@ -92,6 +92,14 @@ Run the test suite:
 uv run pytest
 ```
 
+That's `MockProvider` only — no network, no keys. To also smoke-test the
+real Anthropic/OpenAI providers (real network, real cost, needs
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`), opt in explicitly:
+
+```bash
+uv run pytest -m live
+```
+
 ## Swap providers
 
 Every LLM call in the machine goes through one method:

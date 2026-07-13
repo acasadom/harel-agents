@@ -6,12 +6,12 @@ class AnthropicProvider(LLMProvider):
     Anthropic Claude provider.
 
     Args:
-        model: Claude model id, default "claude-sonnet-4-6".
+        model: Claude model id, default "claude-sonnet-5".
         max_tokens: max output tokens, default 2048.
         api_key: if None, reads from ANTHROPIC_API_KEY env var.
     """
 
-    DEFAULT_MODEL = "claude-sonnet-4-6"
+    DEFAULT_MODEL = "claude-sonnet-5"
 
     def __init__(
         self,
