@@ -2,6 +2,7 @@
 Unit tests for provider implementations. No network calls, no API keys —
 the Anthropic/OpenAI SDKs are faked via sys.modules so complete() request
 shaping and response parsing can be checked without the packages installed.
+(GroqProvider reuses the openai SDK, so it's faked the same way.)
 """
 
 import importlib
@@ -41,6 +42,7 @@ def test_mock_provider_raises_scripted_exception():
     [
         ("anthropic", "research_agent.providers.anthropic", "AnthropicProvider", "anthropic"),
         ("openai", "research_agent.providers.openai", "OpenAIProvider", "openai"),
+        ("openai", "research_agent.providers.groq", "GroqProvider", "groq"),
     ],
 )
 def test_provider_missing_sdk_raises_import_error(
@@ -119,3 +121,61 @@ def test_openai_provider_complete_sends_system_and_user(monkeypatch):
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "user prompt"},
     ]
+
+
+def test_groq_provider_complete_sends_system_and_user(monkeypatch):
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            message = types.SimpleNamespace(content="groq response")
+            choice = types.SimpleNamespace(message=message)
+            return types.SimpleNamespace(choices=[choice])
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = FakeCompletions()
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            self.chat = FakeChat()
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.OpenAI = FakeClient
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    from research_agent.providers.groq import GroqProvider
+
+    provider = GroqProvider(model="llama-test", max_tokens=42, api_key="k")
+    result = provider.complete("system prompt", "user prompt")
+
+    assert result == "groq response"
+    assert captured["client_kwargs"]["base_url"] == "https://api.groq.com/openai/v1"
+    assert captured["model"] == "llama-test"
+    assert captured["max_tokens"] == 42
+    assert captured["messages"] == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "user prompt"},
+    ]
+
+
+def test_groq_provider_reads_groq_api_key_env_var(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.OpenAI = FakeClient
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
+
+    from research_agent.providers.groq import GroqProvider
+
+    GroqProvider()
+
+    assert captured["client_kwargs"]["api_key"] == "groq-secret"

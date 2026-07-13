@@ -85,8 +85,8 @@ uv run python -m research_agent.run --question "What are the tradeoffs of statec
 
 That runs the mock provider by default — no API key needed, useful to see the
 whole flow work end to end. To ask a real question with a real model, copy
-`.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
-(loaded automatically), or export them in your shell:
+`.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/
+`GROQ_API_KEY` (loaded automatically), or export them in your shell:
 
 ```bash
 cp .env.example .env   # then edit it
@@ -95,6 +95,10 @@ uv run python -m research_agent.run \
   --question "What are the tradeoffs of statecharts for agent orchestration?" \
   --provider anthropic --db research.sqlite3
 ```
+
+No card on hand? [Groq](https://console.groq.com) has a genuinely free tier
+(`--provider groq`, reads `GROQ_API_KEY`) — the easiest way to try a real
+model without paying.
 
 `--db` points the runner at a `SqliteStore` file instead of the default
 in-memory store. It's optional for a single one-shot question, but it's what
@@ -108,8 +112,8 @@ uv run pytest
 ```
 
 That's `MockProvider` only — no network, no keys. To also smoke-test the
-real Anthropic/OpenAI providers (real network, real cost, needs
-`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`), opt in explicitly:
+real Anthropic/OpenAI/Groq providers (real network, needs the matching API
+key — Groq's is free) opt in explicitly:
 
 ```bash
 uv run pytest -m live
@@ -121,7 +125,11 @@ Every LLM call in the machine goes through one method:
 [`LLMProvider.complete(system, user) -> str`](research_agent/providers/base.py).
 `--provider mock` (default) is deterministic and used by the whole test
 suite; `--provider anthropic` reads `ANTHROPIC_API_KEY` and calls Claude;
-`--provider openai` reads `OPENAI_API_KEY` and calls GPT. None of
+`--provider openai` reads `OPENAI_API_KEY` and calls GPT;
+`--provider groq` reads `GROQ_API_KEY` and calls a Groq-hosted open model
+over an OpenAI-compatible endpoint — free, and the SDK is just `openai`
+pointed at a different `base_url` (see
+[`providers/groq.py`](research_agent/providers/groq.py)). None of
 [`actions.py`](research_agent/actions.py) — the code that drives the
 machine — changes: swapping providers is a CLI flag, not a code change.
 

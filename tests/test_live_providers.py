@@ -102,3 +102,24 @@ def test_openai_provider_default_model_is_valid():
 
     assert isinstance(result, str)
     assert result.strip()
+
+
+# GroqProvider reuses the openai SDK (pointed at Groq's base URL), so its
+# guard is the same "openai" import — but Groq has a free tier, so this is
+# the cheapest of the three to actually run with a real key.
+@pytest.mark.skipif(
+    importlib.util.find_spec("openai") is None,
+    reason="openai not installed (pip install 'harel-agents[groq]')",
+)
+@pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"), reason="GROQ_API_KEY not set")
+def test_groq_provider_completes_a_real_prompt():
+    from research_agent.providers.groq import GroqProvider
+
+    provider = GroqProvider(max_tokens=16)
+    result = provider.complete(
+        "Reply with exactly one word, no punctuation.",
+        "What is the capital of France?",
+    )
+
+    assert isinstance(result, str)
+    assert result.strip()

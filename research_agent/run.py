@@ -2,7 +2,7 @@
 CLI entry point.
 
 Usage:
-    python -m research_agent.run --question "..." [--provider anthropic|openai|mock] [--db PATH]
+    python -m research_agent.run --question "..." [--provider anthropic|openai|groq|mock] [--db PATH]
     python -m research_agent.run --approve <execution_id> [--db PATH]
     python -m research_agent.run --revise  <execution_id> [--provider ...] [--db PATH]
     python -m research_agent.run --sweep-timers [--db PATH]
@@ -55,6 +55,10 @@ def _make_provider(provider_name: str):
         from research_agent.providers.openai import OpenAIProvider
 
         return OpenAIProvider()
+    if provider_name == "groq":
+        from research_agent.providers.groq import GroqProvider
+
+        return GroqProvider()
     raise ValueError(f"Unknown provider: {provider_name}")
 
 
@@ -167,7 +171,7 @@ def main() -> None:
     parser.add_argument("--question", help="Research question")
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "openai", "mock"],
+        choices=["anthropic", "openai", "groq", "mock"],
         default=None,
         help="Defaults to 'mock' for a new question; reuses the original "
         "run's provider for --revise if omitted",
