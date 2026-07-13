@@ -80,6 +80,9 @@ uv sync --extra dev
 uv run python -m research_agent.run --question "What are the tradeoffs of statecharts for agent orchestration?"
 ```
 
+(`uv run research --question "..."` is a shorter equivalent — the
+[`research`](pyproject.toml) console script `uv sync` installs.)
+
 That runs the mock provider by default — no API key needed, useful to see the
 whole flow work end to end. To ask a real question with a real model, copy
 `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
@@ -195,7 +198,17 @@ states or missing branches before running anything.
 
 **Add a new provider** — implement `LLMProvider.complete(system, user) -> str`
 (see [`providers/anthropic.py`](research_agent/providers/anthropic.py) for
-the shape), add it to `_make_provider()` in
-[`run.py`](research_agent/run.py), and add the SDK as an optional dependency
-in `pyproject.toml`. Nothing in `actions.py` or the `.stm` files needs to
-change.
+the shape — its SDK-missing guard is one line via
+[`providers/base.require_sdk()`](research_agent/providers/base.py)), add it
+to `_make_provider()` in [`run.py`](research_agent/run.py), and add the SDK
+as an optional dependency in `pyproject.toml`. Nothing in `actions.py` or the
+`.stm` files needs to change.
+
+## Editing the `.stm` files
+
+`uv sync --extra dev` also installs `harel[lsp]`, so the
+[harel VSCode extension](https://github.com/acasadom/harel/tree/main/editor/vscode)
+gets live diagnostics, hover, go-to-definition and a Mermaid preview for
+`.stm` files, on top of syntax highlighting (which works with no server at
+all). The extension auto-detects this repo's `.venv`; if it doesn't pick it
+up, point `harel.pythonPath` at `.venv/bin/python`.
