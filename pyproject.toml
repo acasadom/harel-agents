@@ -11,7 +11,7 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.25"]
 openai    = ["openai>=1.0"]
-dev       = ["pytest"]
+dev       = ["pytest", "harel[lsp]"]
 
 [project.scripts]
 research = "research_agent.run:main"
