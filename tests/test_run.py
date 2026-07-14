@@ -6,10 +6,11 @@ the user *why*, not just "Status: DONE / failed" — and for --model overrides.
 import sys
 import types
 
+import pytest
 from harel import DictStore
 
 from research_agent.providers.mock import MockProvider
-from research_agent.run import _load_runner, _make_provider, _print_result
+from research_agent.run import _load_runner, _make_provider, cmd_list_models, _print_result
 
 PLAN = '["A", "B", "C"]'
 
@@ -17,6 +18,14 @@ PLAN = '["A", "B", "C"]'
 def _run(provider, **extra_context):
     runner, agent_defn = _load_runner(DictStore(), provider)
     return runner.create(agent_defn.id, context={"question": "Q", **extra_context})
+
+
+@pytest.mark.parametrize("provider_name", [None, "mock"])
+def test_list_models_rejects_mock(provider_name, capsys):
+    with pytest.raises(SystemExit):
+        cmd_list_models(provider_name)
+
+    assert "mock has no real models" in capsys.readouterr().err
 
 
 def test_make_provider_model_override_reaches_the_client(monkeypatch):

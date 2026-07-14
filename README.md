@@ -139,18 +139,11 @@ daily cap on one (`llama-3.3-70b-versatile`, the default) doesn't mean
 you're stuck — list what's available and switch:
 
 ```bash
-uv run python -c "
-import os
-from dotenv import load_dotenv
-load_dotenv()
-from openai import OpenAI
-from research_agent.providers.groq import GroqProvider
-client = OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url=GroqProvider.BASE_URL)
-for m in client.models.list().data:
-    print(m.id)
-"
+uv run python -m research_agent.run --list-models --provider groq
 uv run python -m research_agent.run --question "..." --provider groq --model llama-3.1-8b-instant
 ```
+
+`--list-models` works the same way for `--provider anthropic`/`openai`.
 
 ## How it works
 

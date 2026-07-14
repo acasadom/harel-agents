@@ -179,3 +179,67 @@ def test_groq_provider_reads_groq_api_key_env_var(monkeypatch):
     GroqProvider()
 
     assert captured["client_kwargs"]["api_key"] == "groq-secret"
+
+
+def _fake_models(*model_ids):
+    """A directly-iterable fake page of model objects, matching the shape
+    both the openai and anthropic SDKs' models.list() return."""
+    return [types.SimpleNamespace(id=m) for m in model_ids]
+
+
+def test_anthropic_provider_list_models_is_sorted(monkeypatch):
+    class FakeModels:
+        def list(self):
+            return _fake_models("claude-sonnet-5", "claude-haiku-4-5", "claude-opus-4-8")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    fake_anthropic = types.ModuleType("anthropic")
+    fake_anthropic.Anthropic = FakeClient
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    from research_agent.providers.anthropic import AnthropicProvider
+
+    assert AnthropicProvider().list_models() == [
+        "claude-haiku-4-5", "claude-opus-4-8", "claude-sonnet-5",
+    ]
+
+
+def test_openai_provider_list_models_is_sorted(monkeypatch):
+    class FakeModels:
+        def list(self):
+            return _fake_models("gpt-4o", "gpt-4o-mini")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.OpenAI = FakeClient
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    from research_agent.providers.openai import OpenAIProvider
+
+    assert OpenAIProvider().list_models() == ["gpt-4o", "gpt-4o-mini"]
+
+
+def test_groq_provider_list_models_is_sorted(monkeypatch):
+    class FakeModels:
+        def list(self):
+            return _fake_models("llama-3.3-70b-versatile", "llama-3.1-8b-instant")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.OpenAI = FakeClient
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    from research_agent.providers.groq import GroqProvider
+
+    assert GroqProvider().list_models() == [
+        "llama-3.1-8b-instant", "llama-3.3-70b-versatile",
+    ]

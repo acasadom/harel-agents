@@ -5,6 +5,7 @@ Usage:
     python -m research_agent.run --question "..." [--provider anthropic|openai|groq|mock] [--db PATH] [-v]
     python -m research_agent.run --approve <execution_id> [--db PATH] [-v]
     python -m research_agent.run --revise  <execution_id> [--provider ...] [--db PATH] [-v]
+    python -m research_agent.run --list-models --provider anthropic|openai|groq
     python -m research_agent.run --sweep-timers [--db PATH]
 
 --db persists state across invocations (each CLI call is a fresh process);
@@ -238,6 +239,18 @@ def cmd_revise(
     _print_result(exe, verbose=verbose)
 
 
+def cmd_list_models(provider_name: str | None) -> None:
+    """List the model ids available to a real provider's API key."""
+    if provider_name in (None, "mock"):
+        print(
+            "mock has no real models — pass --provider anthropic|openai|groq.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    for model_id in _make_provider(provider_name).list_models():
+        print(model_id)
+
+
 def cmd_sweep_timers(db_path: str | None) -> None:
     """Fire any due durable timers (e.g. HumanReview's 24h timeout)."""
     store = _make_store(db_path)
@@ -266,6 +279,12 @@ def main() -> None:
     parser.add_argument("--approve", metavar="EXEC_ID")
     parser.add_argument("--revise", metavar="EXEC_ID")
     parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="List the model ids available to --provider's API key and exit "
+        "(anthropic/openai/groq only)",
+    )
+    parser.add_argument(
         "--sweep-timers",
         action="store_true",
         help="Fire any due durable timers (e.g. HumanReview's 24h timeout) and exit",
@@ -283,7 +302,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.sweep_timers:
+    if args.list_models:
+        cmd_list_models(args.provider)
+    elif args.sweep_timers:
         cmd_sweep_timers(args.db)
     elif args.approve:
         cmd_approve(args.approve, args.db, verbose=args.verbose)
