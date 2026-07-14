@@ -187,6 +187,39 @@ timer when something asks it to — nothing does that automatically here. Run
 `--sweep-timers --db research.sqlite3` periodically (e.g. from cron) against
 the same `--db` to actually let an unreviewed run time out to `Failed`.
 
+## Watching it run
+
+By default the CLI only prints the final answer (or, on failure, why —
+see `_print_failure_reason` in [`run.py`](research_agent/run.py)). To see
+what happened at *every* phase, not just the outcome:
+
+```bash
+uv run python -m research_agent.run --question "..." --provider groq --db research.sqlite3 -v
+```
+
+`-v`/`--verbose` prints the planned sub-topics, each one's research (or its
+error, if that sub-topic failed), and the grade — before the final answer.
+
+For the full picture — the statechart tree with the **active state
+highlighted live**, and a step-by-step timeline of every transition, action,
+and context change — use harel's own TUI. Every execution here records a
+trace (`DurableRunner(..., trace=True)` in `_load_runner`) specifically so
+this works:
+
+```bash
+STM_STORE_DB=research.sqlite3 uv run harel monitor --definitions-dir research_agent/machines
+```
+
+(Needs `harel[tui]`, already in the `dev` extra.) `enter` opens an
+execution, `↑`/`↓` walks its timeline. This is also the answer to "did the
+retry loop / escalation / fan-out failure path actually run, or did the
+model just happen to always say complete?" — real questions against a real
+provider mostly *do* grade "complete" on the first try (a capable model
+usually gets it right), so seeing the other paths exercised for real, rather
+than taking it on faith, means either asking something ambiguous enough to
+plausibly escalate, or watching the deterministic paths in `tests/test_agent.py`
+(which script every branch on purpose) run.
+
 ## vs LangGraph
 
 Full comparison: [`docs/vs-langgraph.md`](docs/vs-langgraph.md).
@@ -214,7 +247,8 @@ as an optional dependency in `pyproject.toml`. Nothing in `actions.py` or the
 
 ## Editing the `.stm` files
 
-`uv sync --extra dev` also installs `harel[lsp]`, so the
+`uv sync --extra dev` also installs `harel[lsp]` and `harel[tui]` (the
+[`monitor`](#watching-it-run) dependency), so the
 [harel VSCode extension](https://github.com/acasadom/harel/tree/main/editor/vscode)
 gets live diagnostics, hover, go-to-definition and a Mermaid preview for
 `.stm` files, on top of syntax highlighting (which works with no server at

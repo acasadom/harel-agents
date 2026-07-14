@@ -2,13 +2,20 @@
 CLI entry point.
 
 Usage:
-    python -m research_agent.run --question "..." [--provider anthropic|openai|groq|mock] [--db PATH]
-    python -m research_agent.run --approve <execution_id> [--db PATH]
-    python -m research_agent.run --revise  <execution_id> [--provider ...] [--db PATH]
+    python -m research_agent.run --question "..." [--provider anthropic|openai|groq|mock] [--db PATH] [-v]
+    python -m research_agent.run --approve <execution_id> [--db PATH] [-v]
+    python -m research_agent.run --revise  <execution_id> [--provider ...] [--db PATH] [-v]
     python -m research_agent.run --sweep-timers [--db PATH]
 
 --db persists state across invocations (each CLI call is a fresh process);
 required for --approve/--revise to find an execution created earlier.
+
+-v / --verbose prints the plan, each sub-topic's research, and the grade —
+not just the final answer. For the full step-by-step execution timeline
+(every transition, action, and context change) with the statechart drawn
+live and the active state highlighted, run `harel monitor` against the same
+--db instead (see README) — every execution here records a trace (trace=True)
+for exactly that.
 
 --sweep-timers fires any due durable timers (e.g. HumanReview's 24h
 escalation timeout) and exits. harel only delivers a Timeout event when
@@ -84,14 +91,16 @@ def _load_runner(
         )
         resolver = DictResolver({"sub_researcher": sub_defn})
     runner = DurableRunner(
-        store, {agent_defn.id: agent_defn}, clock=clock, resolver=resolver
+        store, {agent_defn.id: agent_defn}, clock=clock, resolver=resolver, trace=True
     )
     return runner, agent_defn
 
 
-def _print_result(exe) -> None:
+def _print_result(exe, verbose: bool = False) -> None:
     print(f"Execution id: {exe.id}")
     print(f"Status: {exe.status.name} / {exe.outcome}")
+    if verbose:
+        _print_verbose_breakdown(exe)
     if exe.context.get("draft") is not None:
         print("\n--- ANSWER ---")
         print(exe.context["draft"])
@@ -101,6 +110,33 @@ def _print_result(exe) -> None:
         print(f"  Revise:  python -m research_agent.run --revise  {exe.id}")
     elif exe.outcome == "failed":
         _print_failure_reason(exe)
+
+
+def _print_verbose_breakdown(exe) -> None:
+    """Print what happened at each phase — plan, each sub-topic's research,
+    grading — not just the final answer/failure. For the full step-by-step
+    timeline (event in, transition, actions, context before->after) with the
+    statechart drawn live, use `harel monitor` instead (see README)."""
+    ctx = exe.context
+    if ctx.get("sub_topics"):
+        print("\n--- PLAN ---")
+        for i, topic in enumerate(ctx["sub_topics"]):
+            print(f"  {i + 1}. {topic}")
+    region_results = ctx.get("region_results", {})
+    if region_results:
+        print("\n--- RESEARCH ---")
+        for key, result in region_results.items():
+            if result.get("outcome") == "success":
+                print(f"  [{key}] {result.get('summary', '')}")
+            else:
+                print(f"  [{key}] FAILED: {result.get('research_error', '(no error recorded)')}")
+    if ctx.get("grade"):
+        print("\n--- GRADING ---")
+        print(f"  grade: {ctx['grade']}")
+        if ctx.get("grade_feedback"):
+            print(f"  feedback: {ctx['grade_feedback']}")
+    if ctx.get("retries"):
+        print(f"\n--- RETRIES: {ctx['retries']} ---")
 
 
 def _print_failure_reason(exe) -> None:
@@ -143,7 +179,9 @@ def _require_execution(store, execution_id: str):
     return existing
 
 
-def cmd_ask(question: str, provider_name: str | None, db_path: str | None) -> None:
+def cmd_ask(
+    question: str, provider_name: str | None, db_path: str | None, verbose: bool = False
+) -> None:
     """Create and run a research agent for the given question."""
     if not db_path:
         print(
@@ -158,20 +196,22 @@ def cmd_ask(question: str, provider_name: str | None, db_path: str | None) -> No
     exe = runner.create(
         agent_defn.id, context={"question": question, "provider_name": provider_name}
     )
-    _print_result(exe)
+    _print_result(exe, verbose=verbose)
 
 
-def cmd_approve(execution_id: str, db_path: str | None) -> None:
+def cmd_approve(execution_id: str, db_path: str | None, verbose: bool = False) -> None:
     """Send an Approved event to an execution in HumanReview. Needs no
     provider — that transition triggers no action."""
     store = _make_store(db_path)
     _require_execution(store, execution_id)
     runner, _ = _load_runner(store, None, include_sub_researcher=False)
     exe = runner.process(execution_id, Event(kind="Approved"))
-    _print_result(exe)
+    _print_result(exe, verbose=verbose)
 
 
-def cmd_revise(execution_id: str, provider_name: str | None, db_path: str | None) -> None:
+def cmd_revise(
+    execution_id: str, provider_name: str | None, db_path: str | None, verbose: bool = False
+) -> None:
     """Send a RequestRevision event to an execution in HumanReview.
 
     Needs a provider: RequestRevision re-runs Drafting's draft_answer. If
@@ -184,7 +224,7 @@ def cmd_revise(execution_id: str, provider_name: str | None, db_path: str | None
         store, _make_provider(provider_name), include_sub_researcher=False
     )
     exe = runner.process(execution_id, Event(kind="RequestRevision"))
-    _print_result(exe)
+    _print_result(exe, verbose=verbose)
 
 
 def cmd_sweep_timers(db_path: str | None) -> None:
@@ -215,16 +255,24 @@ def main() -> None:
     parser.add_argument(
         "--db", metavar="PATH", help="SQLite file for durable storage across runs"
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print the plan, each sub-topic's research, and the grade — not "
+        "just the final answer/failure. For the full step-by-step timeline "
+        "with the statechart drawn live, use `harel monitor` instead.",
+    )
     args = parser.parse_args()
 
     if args.sweep_timers:
         cmd_sweep_timers(args.db)
     elif args.approve:
-        cmd_approve(args.approve, args.db)
+        cmd_approve(args.approve, args.db, verbose=args.verbose)
     elif args.revise:
-        cmd_revise(args.revise, args.provider, args.db)
+        cmd_revise(args.revise, args.provider, args.db, verbose=args.verbose)
     elif args.question:
-        cmd_ask(args.question, args.provider, args.db)
+        cmd_ask(args.question, args.provider, args.db, verbose=args.verbose)
     else:
         parser.print_help()
         sys.exit(1)

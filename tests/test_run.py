@@ -60,3 +60,38 @@ def test_happy_path_does_not_print_failure_section(capsys):
     out = capsys.readouterr().out
     assert "WHY IT FAILED" not in out
     assert "final answer" in out
+
+
+def test_verbose_prints_plan_research_and_grading(capsys):
+    exe = _run(
+        MockProvider(
+            [PLAN, "summary A", "summary B", "summary C",
+             '{"grade": "complete", "feedback": "looks solid"}', "final answer"]
+        )
+    )
+
+    _print_result(exe, verbose=True)
+
+    out = capsys.readouterr().out
+    assert "--- PLAN ---" in out
+    assert "A" in out and "B" in out and "C" in out
+    assert "--- RESEARCH ---" in out
+    assert "summary A" in out
+    assert "--- GRADING ---" in out
+    assert "grade: complete" in out
+    assert "looks solid" in out
+
+
+def test_non_verbose_omits_the_breakdown(capsys):
+    exe = _run(
+        MockProvider(
+            [PLAN, "summary A", "summary B", "summary C",
+             '{"grade": "complete", "feedback": ""}', "final answer"]
+        )
+    )
+
+    _print_result(exe, verbose=False)
+
+    out = capsys.readouterr().out
+    assert "--- PLAN ---" not in out
+    assert "--- RESEARCH ---" not in out

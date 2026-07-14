@@ -12,7 +12,7 @@ dependencies = [
 anthropic = ["anthropic>=0.25"]
 openai    = ["openai>=1.0"]
 groq      = ["openai>=1.0"]
-dev       = ["pytest", "harel[lsp]"]
+dev       = ["pytest", "harel[lsp]", "harel[tui]"]
 
 [project.scripts]
 research = "research_agent.run:main"
