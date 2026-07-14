@@ -34,3 +34,6 @@ class OpenAIProvider(LLMProvider):
             ],
         )
         return resp.choices[0].message.content
+
+    def list_models(self) -> list[str]:
+        return sorted(m.id for m in self._client.models.list())

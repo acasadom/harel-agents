@@ -32,3 +32,6 @@ class AnthropicProvider(LLMProvider):
             messages=[{"role": "user", "content": user}],
         )
         return msg.content[0].text
+
+    def list_models(self) -> list[str]:
+        return sorted(m.id for m in self._client.models.list())
