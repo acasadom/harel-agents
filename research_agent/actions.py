@@ -42,12 +42,56 @@ def _complete(provider, system: str, user: str) -> str:
         raise ProviderError(str(exc)) from exc
 
 
+def _strip_code_fence(text: str) -> str:
+    """LLMs commonly wrap JSON in a ```json ... ``` fence despite being told
+    not to. Strip it so json.loads() sees just the payload."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]  # drop the opening fence (with optional language tag)
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 def _complete_json(provider, system: str, user: str) -> Any:
-    raw = _complete(provider, system, user)
+    raw = _strip_code_fence(_complete(provider, system, user))
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ProviderError(f"invalid JSON from provider: {exc}") from exc
+
+
+def _normalize_topics(parsed: Any) -> list[str]:
+    """Coerce a few shapes an LLM might reasonably return instead of a flat
+    list[str] — a dict wrapping the array, or a list of single-field objects
+    like {"topic": "..."} — instead of failing on a harmless formatting
+    choice the prompt didn't rule out explicitly enough."""
+    if isinstance(parsed, dict):
+        list_values = [v for v in parsed.values() if isinstance(v, list)]
+        if len(list_values) == 1:
+            parsed = list_values[0]
+    if not isinstance(parsed, list) or not parsed:
+        raise ProviderError(f"expected a JSON array of strings, got: {parsed!r}")
+    topics = []
+    for item in parsed:
+        if isinstance(item, str):
+            topics.append(item)
+            continue
+        if isinstance(item, dict):
+            if len(item) == 1:
+                (value,) = item.values()
+            else:
+                value = next(
+                    (item[k] for k in ("topic", "title", "name", "subtopic") if k in item),
+                    None,
+                )
+            if isinstance(value, str):
+                topics.append(value)
+                continue
+        raise ProviderError(f"couldn't read a topic string from entry: {item!r}")
+    return topics
 
 
 def _summaries(stm) -> list[str]:
@@ -82,14 +126,13 @@ def plan_research(stm, event, provider, **kwargs) -> None:
     n = stm.execution_ctx.get("num_topics", 3)
     system = (
         "You are a research planner. Given a question, return a JSON array of "
-        f"exactly {n} distinct sub-topics to research. Output ONLY valid JSON, "
-        "no explanation."
+        f"exactly {n} distinct sub-topics to research, as plain strings (not "
+        'objects). Example: ["Sub-topic one", "Sub-topic two", "Sub-topic three"]. '
+        "Output ONLY that JSON array, no explanation, no markdown code fences."
     )
     user = f"Question: {question}"
     try:
-        parsed = _complete_json(provider, system, user)
-        if not isinstance(parsed, list) or not all(isinstance(t, str) for t in parsed):
-            raise ProviderError(f"expected a JSON array of strings, got: {parsed!r}")
+        parsed = _normalize_topics(_complete_json(provider, system, user))
     except ProviderError as exc:
         stm.execution_ctx["plan_error"] = str(exc)
         return

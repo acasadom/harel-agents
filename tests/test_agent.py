@@ -214,6 +214,62 @@ def test_plan_research_failure_routes_to_failed(exe):
 
 @pytest.mark.parametrize(
     "provider",
+    [
+        [
+            # a real model returned this shape for plan_research once —
+            # single-field objects instead of plain strings
+            '[{"topic": "topic A"}, {"topic": "topic B"}, {"topic": "topic C"}]',
+            "Summary A", "Summary B", "Summary C",
+            GRADE_COMPLETE,
+            "Final answer.",
+        ]
+    ],
+    indirect=True,
+)
+def test_plan_research_tolerates_list_of_topic_objects(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "success"
+    assert exe.context["sub_topics"] == ["topic A", "topic B", "topic C"]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        [
+            '{"sub_topics": ["topic A", "topic B", "topic C"]}',
+            "Summary A", "Summary B", "Summary C",
+            GRADE_COMPLETE,
+            "Final answer.",
+        ]
+    ],
+    indirect=True,
+)
+def test_plan_research_tolerates_dict_wrapped_array(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "success"
+    assert exe.context["sub_topics"] == ["topic A", "topic B", "topic C"]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        [
+            '```json\n["topic A", "topic B", "topic C"]\n```',
+            "Summary A", "Summary B", "Summary C",
+            GRADE_COMPLETE,
+            "Final answer.",
+        ]
+    ],
+    indirect=True,
+)
+def test_plan_research_tolerates_markdown_fenced_json(exe):
+    assert exe.status.name == "DONE"
+    assert exe.outcome == "success"
+    assert exe.context["sub_topics"] == ["topic A", "topic B", "topic C"]
+
+
+@pytest.mark.parametrize(
+    "provider",
     [[PLAN, "Summary A", "Summary B", "Summary C", "not valid json"]],
     indirect=True,
 )
