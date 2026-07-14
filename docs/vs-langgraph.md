@@ -34,11 +34,12 @@ surfaces at all, rather than silently looping or dead-ending.
 
 ## 3. Fan-out
 
-The research step — spawn one child per sub-topic, wait for them, then
-continue — is one line of harel DSL. (The DSL models this as a fan-out; as of
-harel 0.2.1 the engine drives spawned children one at a time rather than
-concurrently, so "one line instead of hand-wired `Send` plumbing" is the
-win here, not wall-clock parallelism — see the engine's `_flush`.)
+The parallel research step — spawn one child per sub-topic, wait for all of
+them, then continue — is one line of harel DSL. As of harel 0.2.2 the engine
+runs the spawned children concurrently (`asyncio.gather` over the spawns,
+sync actions each getting their own thread-pool slot — see `_flush` in
+`engine/aio/driver.py`), so this is wall-clock parallelism, not just a
+one-line notation for something the engine still runs one at a time.
 
 ```
 state Researching {

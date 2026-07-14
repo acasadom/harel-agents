@@ -137,11 +137,11 @@ machine — changes: swapping providers is a CLI flag, not a code change.
 
 - **Planning** asks the provider to break the question into sub-topics; a
   malformed plan routes straight to `Failed`.
-- **Researching** fans out one child execution per sub-topic (harel 0.2.1
-  drives them one at a time under the hood, not concurrently — the DSL still
-  collapses the fan-out to one line either way) running the
-  [`sub_researcher`](research_agent/machines/sub_researcher.stm) machine to
-  produce a summary. If *any* child succeeds, the join continues to Grading
+- **Researching** fans out one child execution per sub-topic — genuinely
+  concurrently as of harel 0.2.2 (`asyncio.gather` over the spawns; sync
+  actions like `research_topic` each get their own thread-pool slot) —
+  running the [`sub_researcher`](research_agent/machines/sub_researcher.stm)
+  machine to produce a summary. If *any* child succeeds, the join continues to Grading
   using whatever summaries came back; only if every child fails does the
   whole run route to `Failed`.
 - **Grading** judges whether the collected summaries answer the question:

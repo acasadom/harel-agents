@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Parallel Research Agent — a reference implementation of harel as a durable, statechart-driven orchestrator for LLM agent workflows."
 requires-python = ">=3.11"
 dependencies = [
-    "harel>=0.2.1",
+    "harel>=0.2.2",
     "python-dotenv>=1.0",
 ]
 

@@ -121,7 +121,7 @@ wheels = [
 
 [[package]]
 name = "harel"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -130,9 +130,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/c8/1184491bf44178b038807d3b5af80f43ec136cbeb92148053da2b13cdca6/harel-0.2.1.tar.gz", hash = "sha256:d40d3310d59dda433905399b9e3dd34b681f7311d12f2457983ef754b13a8cd9", size = 1509439, upload-time = "2026-07-12T18:49:08.637Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/3d/a28604dd910127cae5dd72e3cdc73a7d51d2028bdd1529ad2ffbb160e76d/harel-0.2.2.tar.gz", hash = "sha256:77c397a2143fea2a11d900c95198424f7e94570675cb495dfa83373fb1b8e0df", size = 1512213, upload-time = "2026-07-14T11:13:29.196Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/ba/e86d925e2518de1a58a17263fb89f64a1c3a626682c70ff727fd6f421034/harel-0.2.1-py3-none-any.whl", hash = "sha256:1b3ed378b070afea0310106eb215b231f9c7ffcaa0f9977f99ab9f29a88684a4", size = 233999, upload-time = "2026-07-12T18:49:07.038Z" },
+    { url = "https://files.pythonhosted.org/packages/92/57/f501ad3e3d4adad2df6f2ce5898181be68b7af284f169c11cd30e3e58453/harel-0.2.2-py3-none-any.whl", hash = "sha256:1e74738745e5e19e95716b5b5752729d16ce97ea8a39cef50537775c51722615", size = 234551, upload-time = "2026-07-14T11:13:27.5Z" },
 ]
 
 [package.optional-dependencies]
@@ -167,7 +167,7 @@ openai = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.25" },
-    { name = "harel", specifier = ">=0.2.1" },
+    { name = "harel", specifier = ">=0.2.2" },
     { name = "harel", extras = ["lsp"], marker = "extra == 'dev'" },
     { name = "openai", marker = "extra == 'groq'", specifier = ">=1.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
