@@ -133,6 +133,25 @@ pointed at a different `base_url` (see
 [`actions.py`](research_agent/actions.py) — the code that drives the
 machine — changes: swapping providers is a CLI flag, not a code change.
 
+`--model <id>` overrides whichever provider's default model. Useful with
+Groq specifically: its free tier rate-limits *per model*, so hitting the
+daily cap on one (`llama-3.3-70b-versatile`, the default) doesn't mean
+you're stuck — list what's available and switch:
+
+```bash
+uv run python -c "
+import os
+from dotenv import load_dotenv
+load_dotenv()
+from openai import OpenAI
+from research_agent.providers.groq import GroqProvider
+client = OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url=GroqProvider.BASE_URL)
+for m in client.models.list().data:
+    print(m.id)
+"
+uv run python -m research_agent.run --question "..." --provider groq --model llama-3.1-8b-instant
+```
+
 ## How it works
 
 - **Planning** asks the provider to break the question into sub-topics; a

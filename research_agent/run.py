@@ -42,7 +42,7 @@ load_dotenv()
 MACHINES_DIR = Path(__file__).parent / "machines"
 
 
-def _make_provider(provider_name: str):
+def _make_provider(provider_name: str, model: str | None = None):
     if provider_name == "mock":
         return MockProvider(
             [
@@ -57,15 +57,15 @@ def _make_provider(provider_name: str):
     if provider_name == "anthropic":
         from research_agent.providers.anthropic import AnthropicProvider
 
-        return AnthropicProvider()
+        return AnthropicProvider(**({"model": model} if model else {}))
     if provider_name == "openai":
         from research_agent.providers.openai import OpenAIProvider
 
-        return OpenAIProvider()
+        return OpenAIProvider(**({"model": model} if model else {}))
     if provider_name == "groq":
         from research_agent.providers.groq import GroqProvider
 
-        return GroqProvider()
+        return GroqProvider(**({"model": model} if model else {}))
     raise ValueError(f"Unknown provider: {provider_name}")
 
 
@@ -180,7 +180,11 @@ def _require_execution(store, execution_id: str):
 
 
 def cmd_ask(
-    question: str, provider_name: str | None, db_path: str | None, verbose: bool = False
+    question: str,
+    provider_name: str | None,
+    db_path: str | None,
+    verbose: bool = False,
+    model: str | None = None,
 ) -> None:
     """Create and run a research agent for the given question."""
     if not db_path:
@@ -192,9 +196,10 @@ def cmd_ask(
         )
     provider_name = provider_name or "mock"
     store = _make_store(db_path)
-    runner, agent_defn = _load_runner(store, _make_provider(provider_name))
+    runner, agent_defn = _load_runner(store, _make_provider(provider_name, model))
     exe = runner.create(
-        agent_defn.id, context={"question": question, "provider_name": provider_name}
+        agent_defn.id,
+        context={"question": question, "provider_name": provider_name, "model": model},
     )
     _print_result(exe, verbose=verbose)
 
@@ -210,18 +215,24 @@ def cmd_approve(execution_id: str, db_path: str | None, verbose: bool = False) -
 
 
 def cmd_revise(
-    execution_id: str, provider_name: str | None, db_path: str | None, verbose: bool = False
+    execution_id: str,
+    provider_name: str | None,
+    db_path: str | None,
+    verbose: bool = False,
+    model: str | None = None,
 ) -> None:
     """Send a RequestRevision event to an execution in HumanReview.
 
     Needs a provider: RequestRevision re-runs Drafting's draft_answer. If
-    --provider wasn't given, reuses whichever provider created this execution.
+    --provider/--model weren't given, reuses whichever ones created this
+    execution.
     """
     store = _make_store(db_path)
     existing = _require_execution(store, execution_id)
     provider_name = provider_name or existing.context.get("provider_name", "mock")
+    model = model or existing.context.get("model")
     runner, _ = _load_runner(
-        store, _make_provider(provider_name), include_sub_researcher=False
+        store, _make_provider(provider_name, model), include_sub_researcher=False
     )
     exe = runner.process(execution_id, Event(kind="RequestRevision"))
     _print_result(exe, verbose=verbose)
@@ -244,6 +255,13 @@ def main() -> None:
         default=None,
         help="Defaults to 'mock' for a new question; reuses the original "
         "run's provider for --revise if omitted",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Overrides the provider's default model id (e.g. a Groq model "
+        "hit its daily rate limit — swap to another one without touching "
+        "code). For --revise, reuses the original run's model if omitted.",
     )
     parser.add_argument("--approve", metavar="EXEC_ID")
     parser.add_argument("--revise", metavar="EXEC_ID")
@@ -270,9 +288,13 @@ def main() -> None:
     elif args.approve:
         cmd_approve(args.approve, args.db, verbose=args.verbose)
     elif args.revise:
-        cmd_revise(args.revise, args.provider, args.db, verbose=args.verbose)
+        cmd_revise(
+            args.revise, args.provider, args.db, verbose=args.verbose, model=args.model
+        )
     elif args.question:
-        cmd_ask(args.question, args.provider, args.db, verbose=args.verbose)
+        cmd_ask(
+            args.question, args.provider, args.db, verbose=args.verbose, model=args.model
+        )
     else:
         parser.print_help()
         sys.exit(1)
