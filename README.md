@@ -273,3 +273,7 @@ gets live diagnostics, hover, go-to-definition and a Mermaid preview for
 `.stm` files, on top of syntax highlighting (which works with no server at
 all). The extension auto-detects this repo's `.venv`; if it doesn't pick it
 up, point `harel.pythonPath` at `.venv/bin/python`.
+
+## License
+
+[Apache License 2.0](LICENSE) © Alberto Casado
