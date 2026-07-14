@@ -9,18 +9,22 @@ class AnthropicProvider(LLMProvider):
         model: Claude model id, default "claude-sonnet-5".
         max_tokens: max output tokens, default 2048.
         api_key: if None, reads from ANTHROPIC_API_KEY env var.
+        timeout: request timeout in seconds, default 120 (the SDK's own
+            default is 600s — too long for an interactive CLI to hang on).
     """
 
     DEFAULT_MODEL = "claude-sonnet-5"
+    DEFAULT_TIMEOUT = 120.0
 
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 2048,
         api_key: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         anthropic = require_sdk("anthropic", "anthropic")
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
         self._model = model
         self._max_tokens = max_tokens
 

@@ -84,6 +84,7 @@ def test_anthropic_provider_complete_sends_system_and_user(monkeypatch):
     assert captured["max_tokens"] == 42
     assert captured["system"] == "system prompt"
     assert captured["messages"] == [{"role": "user", "content": "user prompt"}]
+    assert captured["client_kwargs"]["timeout"] == 120.0
 
 
 def test_openai_provider_complete_sends_system_and_user(monkeypatch):
@@ -121,6 +122,7 @@ def test_openai_provider_complete_sends_system_and_user(monkeypatch):
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "user prompt"},
     ]
+    assert captured["client_kwargs"]["timeout"] == 120.0
 
 
 def test_groq_provider_complete_sends_system_and_user(monkeypatch):
@@ -153,12 +155,31 @@ def test_groq_provider_complete_sends_system_and_user(monkeypatch):
 
     assert result == "groq response"
     assert captured["client_kwargs"]["base_url"] == "https://api.groq.com/openai/v1"
+    assert captured["client_kwargs"]["timeout"] == 120.0
     assert captured["model"] == "llama-test"
     assert captured["max_tokens"] == 42
     assert captured["messages"] == [
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "user prompt"},
     ]
+
+
+def test_groq_provider_timeout_is_overridable(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.OpenAI = FakeClient
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    from research_agent.providers.groq import GroqProvider
+
+    GroqProvider(timeout=30.0)
+
+    assert captured["client_kwargs"]["timeout"] == 30.0
 
 
 def test_groq_provider_reads_groq_api_key_env_var(monkeypatch):

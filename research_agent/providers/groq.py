@@ -15,9 +15,12 @@ class GroqProvider(LLMProvider):
         model: Groq-hosted model id, default "llama-3.3-70b-versatile".
         max_tokens: max output tokens, default 2048.
         api_key: if None, reads from GROQ_API_KEY env var.
+        timeout: request timeout in seconds, default 120 (the SDK's own
+            default is 600s — too long for an interactive CLI to hang on).
     """
 
     DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    DEFAULT_TIMEOUT = 120.0
     BASE_URL = "https://api.groq.com/openai/v1"
 
     def __init__(
@@ -25,11 +28,12 @@ class GroqProvider(LLMProvider):
         model: str = DEFAULT_MODEL,
         max_tokens: int = 2048,
         api_key: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         openai = require_sdk("openai", "groq")
         if api_key is None:
             api_key = os.environ.get("GROQ_API_KEY")
-        self._client = openai.OpenAI(api_key=api_key, base_url=self.BASE_URL)
+        self._client = openai.OpenAI(api_key=api_key, base_url=self.BASE_URL, timeout=timeout)
         self._model = model
         self._max_tokens = max_tokens
 
