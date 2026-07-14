@@ -99,6 +99,35 @@ def _print_result(exe) -> None:
         print("\nWaiting for human review.")
         print(f"  Approve: python -m research_agent.run --approve {exe.id}")
         print(f"  Revise:  python -m research_agent.run --revise  {exe.id}")
+    elif exe.outcome == "failed":
+        _print_failure_reason(exe)
+
+
+def _print_failure_reason(exe) -> None:
+    """Surface *why* a run reached Failed — plan_research/grade_research/
+    draft_answer record a "<step>_error" (or grade="failed") in context
+    instead of raising, and a failed sub-topic carries its own
+    research_error back in region_results. None of that is visible unless
+    something prints it."""
+    print("\n--- WHY IT FAILED ---")
+    found = False
+    for key in ("plan_error", "draft_error"):
+        if exe.context.get(key):
+            print(f"{key}: {exe.context[key]}")
+            found = True
+    if exe.context.get("grade") == "failed" and exe.context.get("grade_feedback"):
+        print(f"grade_feedback: {exe.context['grade_feedback']}")
+        found = True
+    for key, result in exe.context.get("region_results", {}).items():
+        if result.get("outcome") == "failed":
+            print(f"{key}: {result.get('research_error', '(no error recorded)')}")
+            found = True
+    if exe.error:
+        print(f"engine error: {exe.error}")
+        found = True
+    if not found:
+        print("(no error recorded in context — re-run with a store you can "
+              "inspect, e.g. --db, and check the execution's context by hand)")
 
 
 def _require_execution(store, execution_id: str):
