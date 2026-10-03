@@ -1,8 +1,12 @@
 """
-harel action and selector functions for the research agent.
+harel action functions for the research agent — the four steps that call
+the LLM. All routing (retries, escalation, failure) lives in the .stm files.
 
-Actions mutate stm.execution_ctx; selectors return a routing key string.
-Signature is (stm, event, **inputs) — the engine always passes these.
+Actions mutate stm.execution_ctx. Signature is (stm, event, **inputs) — the
+engine always passes these. A failed provider call raises ProviderError,
+which each state routes to Failed with `on error`; the engine records it as
+context["_error"] = {"type": ..., "message": ...}. Any other exception is a
+bug and dead-letters the execution (status FAILED).
 
 The LLMProvider is bound per-action via bind_actions(), not carried in
 execution_ctx: durable stores JSON-serialize the context on every commit,
@@ -20,9 +24,8 @@ from typing import Any, Callable, Union
 
 
 def bind_actions(provider: Any) -> dict[str, Union[str, Callable]]:
-    """The actions= dict for definition_from_dsl_file(): the 4 handlers that
-    call the provider, with it baked in via closure. Handlers that don't need
-    a provider resolve through each .stm file's own `bind {}` block instead."""
+    """The actions= dict for definition_from_dsl_file(): every handler the
+    .stm files use, with the provider baked in via closure."""
     return {
         "plan_research": functools.partial(plan_research, provider=provider),
         "research_topic": functools.partial(research_topic, provider=provider),
@@ -111,7 +114,7 @@ def _combined_summaries(stm) -> str:
 
 
 # ---------------------------------------------------------------------------
-# actions (on enter — run before automatic transition)
+# actions (on enter — run before the state's automatic transition)
 # ---------------------------------------------------------------------------
 
 
@@ -119,11 +122,11 @@ def plan_research(stm, event, provider, **kwargs) -> None:
     """
     Break the research question into sub-topics.
 
-    Reads:  context["question"], context.get("num_topics", 3)
-    Writes: context["sub_topics"] on success, context["plan_error"] on failure
+    Reads:  context["question"], context["num_topics"]
+    Writes: context["sub_topics"]
     """
     question = stm.execution_ctx["question"]
-    n = stm.execution_ctx.get("num_topics", 3)
+    n = stm.execution_ctx["num_topics"]
     system = (
         "You are a research planner. Given a question, return a JSON array of "
         f"exactly {n} distinct sub-topics to research, as plain strings (not "
@@ -131,18 +134,7 @@ def plan_research(stm, event, provider, **kwargs) -> None:
         "Output ONLY that JSON array, no explanation, no markdown code fences."
     )
     user = f"Question: {question}"
-    try:
-        parsed = _normalize_topics(_complete_json(provider, system, user))
-    except ProviderError as exc:
-        stm.execution_ctx["plan_error"] = str(exc)
-        return
-    stm.execution_ctx["sub_topics"] = parsed
-
-
-def route_plan(stm, event, **kwargs) -> str:
-    """Route after planning. Returns "failed" if plan_research recorded an
-    error, else "ok"."""
-    return "failed" if stm.execution_ctx.get("plan_error") else "ok"
+    stm.execution_ctx["sub_topics"] = _normalize_topics(_complete_json(provider, system, user))
 
 
 def research_topic(stm, event, provider, **kwargs) -> None:
@@ -150,11 +142,7 @@ def research_topic(stm, event, provider, **kwargs) -> None:
     Research a single sub-topic (runs inside the fan-out child execution).
 
     Reads:  context["topic"], context["question"], context.get("feedback", "")
-    Writes: context["summary"] on success, context["research_error"] on failure
-
-    Must not let a provider error propagate — an unhandled exception fails
-    this child outright and the parent join never sees it. route_research
-    turns the failure into a modeled transition instead.
+    Writes: context["summary"]
     """
     topic = stm.execution_ctx["topic"]
     question = stm.execution_ctx["question"]
@@ -166,19 +154,7 @@ def research_topic(stm, event, provider, **kwargs) -> None:
         f"{feedback_clause}"
     )
     user = f"Main question: {question}\nSub-topic: {topic}"
-    try:
-        stm.execution_ctx["summary"] = _complete(provider, system, user)
-    except ProviderError as exc:
-        stm.execution_ctx["research_error"] = str(exc)
-
-
-def route_research(stm, event, **kwargs) -> str:
-    """
-    Route after researching a single sub-topic.
-
-    Returns: "failed" if research_topic recorded an error, else "ok"
-    """
-    return "failed" if stm.execution_ctx.get("research_error") else "ok"
+    stm.execution_ctx["summary"] = _complete(provider, system, user)
 
 
 def grade_research(stm, event, provider, **kwargs) -> None:
@@ -186,8 +162,8 @@ def grade_research(stm, event, provider, **kwargs) -> None:
     Evaluate whether the collected research answers the question sufficiently.
 
     Reads:  context["question"], context["region_results"]
-    Writes: context["grade"]          ("complete"|"insufficient"|"escalate"|"failed")
-             context["grade_feedback"] (string, guidance for next attempt)
+    Writes: context["grade"]          ("complete"|"insufficient"|"escalate")
+            context["grade_feedback"] (string, guidance for next attempt)
     """
     question = stm.execution_ctx["question"]
     system = (
@@ -200,30 +176,13 @@ def grade_research(stm, event, provider, **kwargs) -> None:
         "out of scope). Output ONLY valid JSON."
     )
     user = f"Question: {question}\n\nResearch collected:\n{_combined_summaries(stm)}"
+    result = _complete_json(provider, system, user)
     try:
-        result = _complete_json(provider, system, user)
         grade = result["grade"]
-    except (ProviderError, KeyError, TypeError) as exc:
-        stm.execution_ctx["grade"] = "failed"
-        stm.execution_ctx["grade_feedback"] = f"grading failed: {exc}"
-        return
+    except (KeyError, TypeError) as exc:
+        raise ProviderError(f"no grade in provider response: {result!r}") from exc
     stm.execution_ctx["grade"] = grade
     stm.execution_ctx["grade_feedback"] = result.get("feedback", "")
-
-
-def prepare_retry(stm, event, **kwargs) -> None:
-    """
-    Increment the retry counter. If this exhausts max_retries, mark the grade
-    as "escalate" — the same signal a direct escalation uses, so Drafting's
-    route_draft routes the resulting best-effort answer to HumanReview.
-
-    Reads:  context.get("retries", 0), context.get("max_retries", 2)
-    Writes: context["retries"], and context["grade"] if retries are exhausted
-    """
-    retries = stm.execution_ctx.get("retries", 0) + 1
-    stm.execution_ctx["retries"] = retries
-    if retries >= stm.execution_ctx.get("max_retries", 2):
-        stm.execution_ctx["grade"] = "escalate"
 
 
 def draft_answer(stm, event, provider, **kwargs) -> None:
@@ -231,7 +190,7 @@ def draft_answer(stm, event, provider, **kwargs) -> None:
     Synthesize the final answer from all research summaries.
 
     Reads:  context["question"], context["region_results"]
-    Writes: context["draft"] on success, context["draft_error"] on failure
+    Writes: context["draft"]
     """
     question = stm.execution_ctx["question"]
     system = (
@@ -240,48 +199,5 @@ def draft_answer(stm, event, provider, **kwargs) -> None:
         "but concise."
     )
     user = f"Question: {question}\n\nResearch:\n{_combined_summaries(stm)}"
-    try:
-        stm.execution_ctx["draft"] = _complete(provider, system, user)
-    except ProviderError as exc:
-        stm.execution_ctx["draft_error"] = str(exc)
+    stm.execution_ctx["draft"] = _complete(provider, system, user)
 
-
-# ---------------------------------------------------------------------------
-# selectors (return a routing key — no side effects beyond context reads)
-# ---------------------------------------------------------------------------
-
-
-def route_grade(stm, event, **kwargs) -> str:
-    """
-    Route after grading. Returns the grade set by grade_research.
-
-    Returns: "complete" | "insufficient" | "escalate" | "failed"
-    """
-    return stm.execution_ctx.get("grade", "escalate")
-
-
-def should_retry(stm, event, **kwargs) -> str:
-    """
-    Decide whether to retry or escalate after refinement.
-
-    Returns: "retry" if retries < max_retries, else "escalate"
-    """
-    retries = stm.execution_ctx.get("retries", 0)
-    max_retries = stm.execution_ctx.get("max_retries", 2)
-    return "retry" if retries < max_retries else "escalate"
-
-
-def route_draft(stm, event, **kwargs) -> str:
-    """
-    Route after drafting. A failed draft_answer call goes to Failed; a draft
-    produced on the escalation path (context["grade"] == "escalate") needs a
-    human to review it before Done; otherwise (the normal "complete" grade
-    happy path) it's done.
-
-    Returns: "failed" | "needs_review" | "ok"
-    """
-    if stm.execution_ctx.get("draft_error"):
-        return "failed"
-    if stm.execution_ctx.get("grade") == "escalate":
-        return "needs_review"
-    return "ok"

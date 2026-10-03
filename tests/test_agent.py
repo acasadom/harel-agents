@@ -11,6 +11,7 @@ test doesn't need to vary them.
 
 import pytest
 from harel import DictStore, Event
+from harel.definition.events import ContextError
 
 from research_agent.providers.mock import MockProvider
 from research_agent.run import _load_runner as _build_runner
@@ -31,15 +32,17 @@ HAPPY_PATH_RESPONSES = [
     "Final answer synthesizing all topics.",
 ]
 
-# Two insufficient rounds exhausts max_retries=2 — the 3rd grade never runs.
-# grade_research and prepare_retry both mark this escalation, so Drafting
-# produces a best-effort answer before parking at HumanReview.
-TWO_INSUFFICIENT_ROUNDS = [
+# max_retries=2 allows 2 retries: the 3rd insufficient grade is the one that
+# gives up. Drafting still produces a best-effort answer before parking at
+# HumanReview, since the grade never reached "complete".
+RETRIES_EXHAUSTED = [
     PLAN,
     "Summary A1", "Summary B1", "Summary C1",
     _grade_insufficient("f1"),
     "Summary A2", "Summary B2", "Summary C2",
     _grade_insufficient("f2"),
+    "Summary A3", "Summary B3", "Summary C3",
+    _grade_insufficient("f3"),
 ]
 
 
@@ -97,18 +100,41 @@ def test_retry_then_complete(exe):
     assert exe.context["retries"] == 1
 
 
-@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS + ["draft after retries"]], indirect=True)
+@pytest.mark.parametrize("provider", [RETRIES_EXHAUSTED + ["draft after retries"]], indirect=True)
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
 def test_max_retries_escalates_to_human_review(exe):
-    # max_retries=2 escalates after 2 rounds — no 3rd research round happens.
     # Escalation produces a best-effort draft before parking, so a human
     # always has something concrete to review.
     assert exe.active_path == "HumanReview"
     assert exe.status.name == "RUNNING"
+    assert exe.context["retries"] == 2
     assert exe.context["draft"] == "draft after retries"
 
 
-@pytest.mark.parametrize("provider", [TWO_INSUFFICIENT_ROUNDS + ["draft after retries"]], indirect=True)
+@pytest.mark.parametrize(
+    "provider",
+    [[PLAN, "Summary A", "Summary B", "Summary C", _grade_insufficient("f"), "draft"]],
+    indirect=True,
+)
+@pytest.mark.parametrize("context", [{"max_retries": 0}], indirect=True)
+def test_max_retries_zero_never_retries(exe):
+    assert exe.active_path == "HumanReview"
+    assert exe.context["retries"] == 0
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [[PLAN, "Summary A", "Summary B", "Summary C", '{"grade": "unsure"}', "draft"]],
+    indirect=True,
+)
+def test_unexpected_grade_goes_to_human_review(exe):
+    # Anything but "complete" needs a human — including a grade the prompt
+    # never asked for.
+    assert exe.active_path == "HumanReview"
+    assert exe.context["draft"] == "draft"
+
+
+@pytest.mark.parametrize("provider", [RETRIES_EXHAUSTED + ["draft after retries"]], indirect=True)
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
 def test_human_approve(runner, exe):
     assert exe.active_path == "HumanReview"
@@ -123,7 +149,7 @@ def test_human_approve(runner, exe):
 
 @pytest.mark.parametrize(
     "provider",
-    [TWO_INSUFFICIENT_ROUNDS + ["draft after retries", "revised draft"]],
+    [RETRIES_EXHAUSTED + ["draft after retries", "revised draft"]],
     indirect=True,
 )
 @pytest.mark.parametrize("context", [{"max_retries": 2}], indirect=True)
@@ -184,6 +210,8 @@ def test_grade_escalate_produces_draft_then_parks_at_human_review(exe):
 def test_fan_out_all_failures_routes_to_failed(exe):
     assert exe.status.name == "DONE"
     assert exe.outcome == "failed"
+    errors = [r["_error"]["message"] for r in exe.context["region_results"].values()]
+    assert sorted(errors) == ["a", "b", "c"]
 
 
 @pytest.mark.parametrize(
@@ -210,6 +238,7 @@ def test_fan_out_partial_failure_survives(exe):
 def test_plan_research_failure_routes_to_failed(exe):
     assert exe.status.name == "DONE"
     assert exe.outcome == "failed"
+    assert exe.context["_error"]["type"] == "ProviderError"
 
 
 @pytest.mark.parametrize(
@@ -280,12 +309,29 @@ def test_grade_research_failure_routes_to_failed(exe):
 
 @pytest.mark.parametrize(
     "provider",
+    [[PLAN, "Summary A", "Summary B", "Summary C", '{"feedback": "no grade here"}']],
+    indirect=True,
+)
+def test_grade_without_grade_field_routes_to_failed(exe):
+    assert exe.outcome == "failed"
+    assert "no grade in provider response" in exe.context["_error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "provider",
     [[PLAN, "Summary A", "Summary B", "Summary C", GRADE_COMPLETE, RuntimeError("draft boom")]],
     indirect=True,
 )
 def test_draft_answer_failure_routes_to_failed(exe):
     assert exe.status.name == "DONE"
     assert exe.outcome == "failed"
+    assert exe.context["_error"]["message"] == "draft boom"
+
+
+def test_context_schema_rejects_a_missing_question(runner):
+    runner_obj, agent_defn = runner
+    with pytest.raises(ContextError):
+        runner_obj.create(agent_defn.id, context={})
 
 
 def test_human_review_timeout_fires_via_sweep():
