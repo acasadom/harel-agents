@@ -130,7 +130,7 @@ def _print_verbose_breakdown(exe) -> None:
             if result.get("outcome") == "success":
                 print(f"  [{key}] {result.get('summary', '')}")
             else:
-                print(f"  [{key}] FAILED: {result.get('research_error', '(no error recorded)')}")
+                print(f"  [{key}] FAILED: {_error_message(result)}")
     if ctx.get("grade"):
         print("\n--- GRADING ---")
         print(f"  grade: {ctx['grade']}")
@@ -140,24 +140,26 @@ def _print_verbose_breakdown(exe) -> None:
         print(f"\n--- RETRIES: {ctx['retries']} ---")
 
 
+def _error_message(ctx: dict) -> str:
+    """The message of the error `on error` recorded in a context (the run's
+    own, or one sub-topic's region result)."""
+    error = ctx.get("_error")
+    return error["message"] if error else "(no error recorded)"
+
+
 def _print_failure_reason(exe) -> None:
-    """Surface *why* a run reached Failed — plan_research/grade_research/
-    draft_answer record a "<step>_error" (or grade="failed") in context
-    instead of raising, and a failed sub-topic carries its own
-    research_error back in region_results. None of that is visible unless
-    something prints it."""
+    """Surface *why* a run reached Failed. An `on error` transition records
+    the ProviderError that caused it as context["_error"]; a failed sub-topic
+    carries its own `_error` back in region_results; an engine-level failure
+    (a bug, dead-lettered) is exe.error."""
     print("\n--- WHY IT FAILED ---")
     found = False
-    for key in ("plan_error", "draft_error"):
-        if exe.context.get(key):
-            print(f"{key}: {exe.context[key]}")
-            found = True
-    if exe.context.get("grade") == "failed" and exe.context.get("grade_feedback"):
-        print(f"grade_feedback: {exe.context['grade_feedback']}")
+    if exe.context.get("_error"):
+        print(f"error: {_error_message(exe.context)}")
         found = True
     for key, result in exe.context.get("region_results", {}).items():
         if result.get("outcome") == "failed":
-            print(f"{key}: {result.get('research_error', '(no error recorded)')}")
+            print(f"{key}: {_error_message(result)}")
             found = True
     if exe.error:
         print(f"engine error: {exe.error}")

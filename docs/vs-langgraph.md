@@ -9,8 +9,10 @@ does.
 
 A `.stm` file is a spec, not a program. `research_agent/machines/agent.stm`
 in this repo is the entire orchestration logic for the research agent —
-states, transitions, retry policy, human-in-the-loop escalation — in ~40
-lines a non-engineer can read top to bottom. It's diffable in code review,
+states, typed context, transitions, retry policy, failure handling,
+human-in-the-loop escalation — in ~55 lines a non-engineer can read top to
+bottom. The Python side is only the four LLM calls; no routing decision
+lives in a Python function. It's diffable in code review,
 renders as a diagram (`harel render agent.stm --mermaid`), and never executes
 arbitrary code at definition time.
 
@@ -23,10 +25,13 @@ non-engineer, or diff meaningfully in a PR.
 ## 2. Static validation
 
 `harel validate agent.stm` catches unreachable states, non-deterministic
-transitions, unresolved selector targets, and missing terminal verdicts —
-before a single execution runs. Try to grade `"unknown"` and there's no
-`"unknown" to X` branch: validation fails at definition time, not three weeks
-into production when an LLM returns something you didn't anticipate.
+transitions, and missing terminal verdicts — before a single execution runs.
+The agent's state is typed too: `agent.stm` declares its context
+(`question: string`, `retries: int = 0`, ...), so a guard or a `set` over a
+field that isn't declared, or of the wrong type, fails validation, and an
+execution created without a `question` is refused with a `ContextError`
+instead of failing halfway through a run. Routing on an LLM's answer ends in
+an `else`, so a grade nobody anticipated still lands somewhere explicit.
 
 LangGraph has no equivalent. A missing conditional edge, an unreachable node,
 or a `Send` targeting a node that doesn't exist surfaces at runtime — if it

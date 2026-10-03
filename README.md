@@ -22,34 +22,26 @@ Planning : on enter: plan_research
 Researching : invoke: sub_researcher
 Researching : invoke each: topic in sub_topics
 Grading : on enter: grade_research
-Refining : on enter: prepare_retry
 Drafting : on enter: draft_answer
 HumanReview : timeout: 86400
 Done : outcome: success
 Failed : outcome: failed
-state Planning__route_plan <<choice>>
-Planning --> Planning__route_plan
-Planning__route_plan --> Researching : route_plan=ok
-Planning__route_plan --> Failed : route_plan=failed
+Planning --> Researching
+Planning --> Failed : error<br/>[type == 'ProviderError']
 state Researching__join_success <<choice>>
 Researching --> Researching__join_success
 Researching__join_success --> Grading : join_success=pass
 Researching__join_success --> Failed : else
-state Grading__route_grade <<choice>>
-Grading --> Grading__route_grade
-Grading__route_grade --> Drafting : route_grade=complete
-Grading__route_grade --> Refining : route_grade=insufficient
-Grading__route_grade --> Drafting : route_grade=escalate
-Grading__route_grade --> Failed : route_grade=failed
-state Refining__should_retry <<choice>>
-Refining --> Refining__should_retry
-Refining__should_retry --> Researching : should_retry=retry
-Refining__should_retry --> Drafting : should_retry=escalate
-state Drafting__route_draft <<choice>>
-Drafting --> Drafting__route_draft
-Drafting__route_draft --> Done : route_draft=ok
-Drafting__route_draft --> HumanReview : route_draft=needs_review
-Drafting__route_draft --> Failed : route_draft=failed
+state Grading__choose <<choice>>
+Grading --> Grading__choose
+Grading__choose --> Researching : [context.grade == 'insufficient' and context.retries < context.max_retries]<br/>/ context.retries = context.retries + 1
+Grading__choose --> Drafting : else
+Grading --> Failed : error<br/>[type == 'ProviderError']
+state Drafting__choose <<choice>>
+Drafting --> Drafting__choose
+Drafting__choose --> Done : [context.grade == 'complete']
+Drafting__choose --> HumanReview : else
+Drafting --> Failed : error<br/>[type == 'ProviderError']
 HumanReview --> Done : Approved
 HumanReview --> Drafting : RequestRevision
 HumanReview --> Failed : Timeout
@@ -60,8 +52,10 @@ Failed --> [*]
 ## Why statecharts for LLM agents
 
 - **Declarative** — the `.stm` file above *is* the orchestration logic:
-  states, transitions, retry policy, escalation, all in one place a
-  non-engineer can read. Nothing is implied by scattered `if` branches.
+  states, transitions, retry policy, escalation, failure handling, all in
+  one place a non-engineer can read. Every routing decision is a guard over
+  the typed execution context, written in the `.stm` file — Python only
+  makes the LLM calls. Nothing is implied by scattered `if` branches.
 - **Durable** — every step is checkpointed. A crash mid-fan-out, or a human
   reviewer who takes 6 hours to respond, doesn't lose state; the execution
   resumes exactly where it left off.
@@ -149,25 +143,29 @@ uv run python -m research_agent.run --question "..." --provider groq --model lla
 
 - **Planning** asks the provider to break the question into sub-topics; a
   malformed plan routes straight to `Failed`.
+
+  Every step that calls the provider handles failure the same way: the
+  action raises `ProviderError` and the state's
+  `on error where type == "ProviderError"` transition routes it to `Failed`,
+  with the error recorded in the context as `_error`. Any other exception is
+  a bug, not a provider failure, and dead-letters the execution instead.
 - **Researching** fans out one child execution per sub-topic — genuinely
   concurrently as of harel 0.2.2 (`asyncio.gather` over the spawns; sync
   actions like `research_topic` each get their own thread-pool slot) —
   running the [`sub_researcher`](research_agent/machines/sub_researcher.stm)
   machine to produce a summary. If *any* child succeeds, the join continues to Grading
   using whatever summaries came back; only if every child fails does the
-  whole run route to `Failed`.
-- **Grading** judges whether the collected summaries answer the question:
-  `complete` moves straight to drafting and `Done`, no human involved.
-  `insufficient` goes to refine-and-retry. `escalate` — or a grading call
-  that itself failed — also goes to Drafting, but flagged for human review.
-- **Refining** records the grader's feedback and increments a retry counter;
-  a selector sends the run back to Researching (feedback-guided) if retries
-  remain, or flags for review and heads to Drafting once `max_retries` is
-  hit.
+  whole run route to `Failed`. A failed child reports its `_error` back in
+  `region_results`.
+- **Grading** judges whether the collected summaries answer the question.
+  `insufficient` with retries left goes back to Researching, guided by the
+  grader's feedback, and increments `retries` (`max_retries` defaults to 2).
+  Everything else — `complete`, `escalate`, or `insufficient` with no
+  retries left — goes on to Drafting.
 - **Drafting** synthesizes an answer from the summaries collected so far —
-  even on the escalation path, so a human always has something concrete to
-  review, never an empty result. It reaches `Done` directly on the normal
-  `complete` path, or `HumanReview` on the escalation path.
+  even when the research wasn't judged complete, so a human always has
+  something concrete to review, never an empty result. It reaches `Done`
+  directly when the grade is `complete`, and `HumanReview` otherwise.
 - **HumanReview** is a parked state with a 24-hour durable timeout — see the
   note below on `--sweep-timers`. It reaches `Done` on `Approved`, loops
   back through `Drafting` (and back to `HumanReview` again) on
@@ -176,8 +174,8 @@ uv run python -m research_agent.run --question "..." --provider groq --model lla
 
 ## Human-in-the-loop
 
-When grading escalates — either directly, or after `max_retries` refine
-attempts — the run produces a best-effort draft first, then parks at
+When the grade isn't `complete` — the grader escalated, or `max_retries`
+retries didn't satisfy it — the run produces a best-effort draft first, then parks at
 `HumanReview`, and the CLI prints the execution id along with the two
 commands that can move it forward:
 
@@ -245,9 +243,12 @@ edge.
 ## Extend it
 
 **Add a new state** — add a `state` block to `agent.stm` with an `on enter`
-action, then add `from`/`select` transitions in and out of it. Run
-`harel validate research_agent/machines/agent.stm` to catch unreachable
-states or missing branches before running anything.
+action, then add `from` transitions (or a `from ... choose { when ... }` that
+routes on the context) in and out of it. A new context key the routing reads
+goes in the machine's `context { ... }` block. Run
+`harel validate research_agent/machines/agent.stm research_agent` to catch
+unreachable states, guards over undeclared context fields, or missing
+branches before running anything.
 
 **Add a new provider** — implement `LLMProvider.complete(system, user) -> str`
 (see [`providers/anthropic.py`](research_agent/providers/anthropic.py) for

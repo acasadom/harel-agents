@@ -69,17 +69,17 @@ def test_plan_research_failure_prints_the_reason(capsys):
 
     out = capsys.readouterr().out
     assert "WHY IT FAILED" in out
-    assert "plan_error" in out
+    assert "invalid JSON from provider" in out
 
 
 def test_grade_research_failure_prints_the_reason(capsys):
-    exe = _run(MockProvider([PLAN, "s1", "s2", "s3", "not valid json"]))
+    exe = _run(MockProvider([PLAN, "s1", "s2", "s3", '{"feedback": "x"}']))
 
     _print_result(exe)
 
     out = capsys.readouterr().out
     assert "WHY IT FAILED" in out
-    assert "grade_feedback" in out
+    assert "no grade in provider response" in out
 
 
 def test_fan_out_all_failures_prints_each_sub_topics_error(capsys):
