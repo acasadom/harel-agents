@@ -10,8 +10,7 @@ test doesn't need to vary them.
 """
 
 import pytest
-from harel import DictStore, Event
-from harel.definition.events import ContextError
+from harel import ContextError, DictStore, Event
 
 from research_agent.providers.mock import MockProvider
 from research_agent.run import _load_runner as _build_runner

@@ -18,14 +18,14 @@ actually runs.
 ```mermaid
 stateDiagram-v2
 [*] --> Planning
-Planning : on enter: plan_research
-Researching : invoke: sub_researcher
-Researching : invoke each: topic in sub_topics
-Grading : on enter: grade_research
-Drafting : on enter: draft_answer
-HumanReview : timeout: 86400
-Done : outcome: success
-Failed : outcome: failed
+Planning : on enter#58; plan_research
+Researching : invoke#58; sub_researcher
+Researching : invoke each#58; topic in sub_topics
+Grading : on enter#58; grade_research
+Drafting : on enter#58; draft_answer
+HumanReview : timeout#58; 86400
+Done : outcome#58; success
+Failed : outcome#58; failed
 Planning --> Researching
 Planning --> Failed : error<br/>[type == 'ProviderError']
 state Researching__join_success <<choice>>
@@ -98,6 +98,16 @@ model without paying.
 in-memory store. It's optional for a single one-shot question, but it's what
 makes an execution parked at `HumanReview` resumable from a *separate* CLI
 invocation later (see [Human-in-the-loop](#human-in-the-loop) below).
+
+A `--db` file created before harel 0.7 has its tables without the `harel_`
+prefix, and 0.7 doesn't see them (`No execution found`). Rename them before
+using the file with this version:
+
+```bash
+for t in executions outbox processed_events timers spawns trace; do
+  sqlite3 research.sqlite3 "ALTER TABLE $t RENAME TO harel_$t"
+done
+```
 
 Run the test suite:
 
@@ -217,7 +227,7 @@ trace (`DurableRunner(..., trace=True)` in `_load_runner`) specifically so
 this works:
 
 ```bash
-STM_STORE_DB=research.sqlite3 uv run harel monitor --definitions-dir research_agent/machines
+HAREL_STORE_DB=research.sqlite3 uv run harel monitor --definitions-dir research_agent/machines
 ```
 
 (Needs `harel[tui]`, already in the `dev` extra.) `enter` opens an
